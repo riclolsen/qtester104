@@ -1,0 +1,259 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>870</width>
+    <height>465</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>MainWindow</string>
+  </property>
+  <widget class="QWidget" name="centralWidget">
+   <layout class="QGridLayout" name="gridLayout">
+    <item row="2" column="0">
+     <widget class="QPushButton" name="pbConnect">
+      <property name="text">
+       <string>Connect</string>
+      </property>
+     </widget>
+    </item>
+    <item row="2" column="6">
+     <widget class="QLabel" name="lbStatus">
+      <property name="text">
+       <string>Connection State</string>
+      </property>
+     </widget>
+    </item>
+    <item row="7" column="0" colspan="5">
+     <widget class="QListWidget" name="lwLog">
+      <property name="sizePolicy">
+       <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+        <horstretch>0</horstretch>
+        <verstretch>0</verstretch>
+       </sizepolicy>
+      </property>
+      <property name="font">
+       <font>
+        <family>Courier New</family>
+        <pointsize>9</pointsize>
+       </font>
+      </property>
+      <property name="verticalScrollBarPolicy">
+       <enum>Qt::ScrollBarAlwaysOn</enum>
+      </property>
+      <property name="horizontalScrollBarPolicy">
+       <enum>Qt::ScrollBarAlwaysOn</enum>
+      </property>
+      <property name="resizeMode">
+       <enum>QListView::Adjust</enum>
+      </property>
+      <property name="layoutMode">
+       <enum>QListView::SinglePass</enum>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="3">
+     <widget class="QLabel" name="label_2">
+      <property name="text">
+       <string>Remote IP Address</string>
+      </property>
+     </widget>
+    </item>
+    <item row="2" column="3">
+     <widget class="QLineEdit" name="leIPRemoto"/>
+    </item>
+    <item row="7" column="5" colspan="2">
+     <widget class="QTableWidget" name="twPontos"/>
+    </item>
+    <item row="2" column="1">
+     <widget class="QPushButton" name="pbGI">
+      <property name="text">
+       <string>GI</string>
+      </property>
+     </widget>
+    </item>
+    <item row="2" column="4">
+     <widget class="QLineEdit" name="leLinkAddress"/>
+    </item>
+    <item row="1" column="4">
+     <widget class="QLabel" name="label_3">
+      <property name="text">
+       <string>Remote Link Address</string>
+      </property>
+     </widget>
+    </item>
+    <item row="2" column="5">
+     <widget class="QLineEdit" name="leMasterAddress"/>
+    </item>
+    <item row="1" column="5">
+     <widget class="QLabel" name="label_4">
+      <property name="text">
+       <string>Local Link Address</string>
+      </property>
+     </widget>
+    </item>
+    <item row="4" column="0">
+     <widget class="QPushButton" name="pbSendCommandsButton">
+      <property name="text">
+       <string>Send Command</string>
+      </property>
+     </widget>
+    </item>
+    <item row="4" column="1">
+     <widget class="QLineEdit" name="leCmdAddress"/>
+    </item>
+    <item row="4" column="4">
+     <widget class="QComboBox" name="cbCmdAsdu">
+      <item>
+       <property name="text">
+        <string>45: Single - C_SC_NA_1</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>46: Double - C_DC_NA_1</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>47: Reg. Step - C_RC_NA_1</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>58: Single with time tag - C_SC_TA_1</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>59: Double with time tag - C_DC_TA_1</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>60: Reg. Step with time tag - C_RC_TA_1</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+    <item row="4" column="3">
+     <widget class="QLineEdit" name="leCmdValue"/>
+    </item>
+    <item row="3" column="1">
+     <widget class="QLabel" name="label_5">
+      <property name="text">
+       <string>Command Address</string>
+      </property>
+     </widget>
+    </item>
+    <item row="3" column="3">
+     <widget class="QLabel" name="label_6">
+      <property name="text">
+       <string>Command Value</string>
+      </property>
+     </widget>
+    </item>
+    <item row="3" column="4">
+     <widget class="QLabel" name="label_7">
+      <property name="text">
+       <string>Command Type</string>
+      </property>
+     </widget>
+    </item>
+    <item row="4" column="5">
+     <widget class="QComboBox" name="cbCmdDuration">
+      <item>
+       <property name="text">
+        <string>0 = no additional definition</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>1 = short pulse</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>2 = long pulse</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>3 = persistent output</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+    <item row="3" column="5">
+     <widget class="QLabel" name="label_8">
+      <property name="text">
+       <string>Command Duration</string>
+      </property>
+     </widget>
+    </item>
+    <item row="4" column="6">
+     <widget class="QCheckBox" name="cbSBO">
+      <property name="text">
+       <string>SBO</string>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="6">
+     <widget class="QLabel" name="lbMode">
+      <property name="text">
+       <string>Mode</string>
+      </property>
+     </widget>
+    </item>
+    <item row="6" column="0">
+     <widget class="QCheckBox" name="cbLog">
+      <property name="text">
+       <string>Log Messages</string>
+      </property>
+     </widget>
+    </item>
+    <item row="6" column="1">
+     <widget class="QCheckBox" name="cbAutoScroll">
+      <property name="text">
+       <string>AutoScroll</string>
+      </property>
+      <property name="checked">
+       <bool>false</bool>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="0" colspan="3">
+     <widget class="QLabel" name="lbCopyright">
+      <property name="font">
+       <font>
+        <italic>true</italic>
+       </font>
+      </property>
+      <property name="text">
+       <string>v1.09 © 2010-2015 Ricardo L. Olsen</string>
+      </property>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QMenuBar" name="menuBar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>870</width>
+     <height>21</height>
+    </rect>
+   </property>
+  </widget>
+  <widget class="QStatusBar" name="statusBar"/>
+ </widget>
+ <layoutdefault spacing="6" margin="11"/>
+ <resources/>
+ <connections/>
+</ui>
