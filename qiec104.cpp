@@ -1,6 +1,6 @@
 /*
  * This software implements an IEC 60870-5-104 protocol tester.
- * Copyright © 2010,2011,2012 Ricardo L. Olsen
+ * Copyright Â© 2010-2017 Ricardo L. Olsen
  *
  * Disclaimer
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
@@ -33,41 +33,58 @@
 QIec104::QIec104( QObject *parent ) :
     QObject( parent )
 {
-mEnding = false;
-mAllowConnect = true;
-SendCommands = 0;
-mLog.activateLog();
-mLog.doLogTime();
+    mEnding = false;
+    mAllowConnect = true;
+    SendCommands = 0;
+    ForcePrimary = 0;
+    mLog.activateLog();
+    mLog.doLogTime();
 
-tcps = new QTcpSocket();
-tmKeepAlive = new QTimer();
+    tcps = new QTcpSocket();
+    tmKeepAlive = new QTimer();
 
-connect( tcps, SIGNAL(readyRead()), this, SLOT(slot_tcpreadytoread()) );
-connect( tcps, SIGNAL(connected()), this, SLOT(slot_tcpconnect()) );
-connect( tcps, SIGNAL(disconnected()), this, SLOT(slot_tcpdisconnect()) );
-connect( tcps, SIGNAL(error(QAbstractSocket::SocketError)), this, SLOT(slot_tcperror(QAbstractSocket::SocketError)),Qt::DirectConnection );
-connect( tmKeepAlive, SIGNAL(timeout()), this, SLOT(slot_keep_alive()) );
+    connect( tcps, SIGNAL(readyRead()), this, SLOT(slot_tcpreadytoread()) );
+    connect( tcps, SIGNAL(connected()), this, SLOT(slot_tcpconnect()) );
+    connect( tcps, SIGNAL(disconnected()), this, SLOT(slot_tcpdisconnect()) );
+    connect( tcps, SIGNAL(error(QAbstractSocket::SocketError)), this, SLOT(slot_tcperror(QAbstractSocket::SocketError)),Qt::DirectConnection );
+    connect( tmKeepAlive, SIGNAL(timeout()), this, SLOT(slot_keep_alive()) );
 
-tcps->moveToThread( &tcpThread );
-tcpThread.start( QThread::TimeCriticalPriority );
+    tcps->moveToThread( &tcpThread );
+    tcpThread.start( QThread::TimeCriticalPriority );
 }
 
 QIec104::~QIec104()
 {
-delete tmKeepAlive;
-delete tcps;
+    delete tmKeepAlive;
+    delete tcps;
 }
 
-void QIec104::dataIndication( iec_obj *obj, int numpoints )
+void QIec104::dataIndication( iec_obj *obj, unsigned numpoints )
 {
     emit signal_dataIndication( obj, numpoints );
 }
 
 void QIec104::connectTCP()
 {
+static int cnt = 0;
+char buf[100];
+
     tcps->close();
     if ( !mEnding && mAllowConnect )
-      tcps->connectToHost( getSecondaryIP(), getPortTCP(), QIODevice::ReadWrite );
+      { // alternate main and backup UTR IP address, if configured
+      if ( (++cnt) % 2 || strcmp(getSecondaryIP_backup(), "") == 0 )
+        {
+        tcps->connectToHost( getSecondaryIP(), quint16(getPortTCP()), QIODevice::ReadWrite );
+        sprintf( buf, "Try to connect IP: %s", getSecondaryIP() );
+        mLog.pushMsg( const_cast<char *>(buf) );
+        }
+      else
+        {
+        tcps->connectToHost( getSecondaryIP_backup(), quint16(getPortTCP()), QIODevice::ReadWrite );
+        sprintf( buf, "Try to connect IP: %s", getSecondaryIP_backup() );
+        mLog.pushMsg( const_cast<char *>(buf) );
+        }
+      }
 }
 
 void QIec104::disconnectTCP()
@@ -81,14 +98,14 @@ void QIec104::slot_tcperror( QAbstractSocket::SocketError socketError )
     {
     char buf[100];
     sprintf( buf, "SocketError: %d", socketError );
-    mLog.pushMsg( (const char *)buf );
+    mLog.pushMsg( const_cast<char *>(buf) );
     }
 }
 
 int QIec104::readTCP( char * buf, int szmax )
 {
     if (!mEnding)
-      return tcps->read( buf, szmax );
+      return int(tcps->read( buf, szmax ));
     else
       return 0;
 }
@@ -98,7 +115,11 @@ void QIec104::sendTCP( char * data, int sz )
 {
     if ( tcps->state() == QAbstractSocket::ConnectedState )
     if ( !mEnding )
-      tcps->write( data, sz );
+      {
+        tcps->write( data, sz );
+        if (mLog.isLogging())
+          LogFrame(data, sz, true);
+      }
 }
 
 void QIec104::slot_tcpconnect()
@@ -116,8 +137,21 @@ void QIec104::slot_tcpdisconnect()
 
 void QIec104::slot_keep_alive()
 {
+    static unsigned int cnts = 1;
+
     if ( !mEnding )
-      onTimerSecond();
+      {
+        cnts++;
+
+        if ( ! (cnts % 5) )
+            if ( tcps->state() != QAbstractSocket::ConnectedState && mAllowConnect )
+            {
+                mLog.pushMsg("!!!!!TRY TO CONNECT!");
+                connectTCP();
+            }
+
+        onTimerSecond();
+      }
 }
 
 void  QIec104::interrogationActConfIndication()
@@ -130,42 +164,29 @@ void  QIec104::interrogationActTermIndication()
     emit signal_interrogationActTermIndication();
 }
 
-void QIec104::commandActConfIndication( iec_obj *obj )
+void QIec104::commandActRespIndication( iec_obj *obj )
 {
-    emit signal_commandActConfIndication( obj );
-}
-
-void QIec104::commandActTermIndication( iec_obj *obj )
-{
-    emit signal_commandActTermIndication( obj );
+    emit signal_commandActRespIndication( obj );
 }
 
 void QIec104::terminate()
 {
-mEnding = true;
-tcps->close();
-tcpThread.quit();
-tcpThread.wait( 1000 );
-if ( tcpThread.isRunning() )
-  tcpThread.terminate();
-if ( tcpThread.isRunning() )
-  tcpThread.wait( 2000 );
+    mEnding = true;
+    tcps->close();
+    tcpThread.quit();
+    tcpThread.wait( 1000 );
+    if ( tcpThread.isRunning() )
+      tcpThread.terminate();
+    if ( tcpThread.isRunning() )
+      tcpThread.wait( 2000 );
 }
 
 void QIec104::slot_tcpreadytoread()
 {
-if ( tcps->bytesAvailable() < 6 )
-  return;
+    if (tcps->bytesAvailable() < 6)
+      tcps->waitForReadyRead(8);
 
-packetReadyTCP();
-
-int cnt = 0;
-// espera para ver se chega mais alguma coisa pela rede
-while ( (tcps->bytesAvailable() > 5) && (cnt++ < 10) )
-  {
-  tcps->waitForReadyRead( 10 );
-  packetReadyTCP();
-  }
+    packetReadyTCP();
 }
 
 void QIec104::disable_connect()
@@ -178,4 +199,8 @@ void QIec104::disable_connect()
 void QIec104::enable_connect()
 {
     mAllowConnect = true;
+}
+
+int QIec104::bytesAvailableTCP() {
+  return int(tcps->bytesAvailable());
 }
