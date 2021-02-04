@@ -374,8 +374,7 @@ char* iec104_class::trim(char* s) {
 }
 
 // Log point, write to log when address is -1
-void iec104_class::LogPoint(int address, double val, char* qualifier, cp56time2a* timetag) {
-  static char buf[15000] = "     ";
+void iec104_class::LogPoint(char* buf, int address, double val, char* qualifier, cp56time2a* timetag) {
 
   if (mLog.isLogging()) {
     if (address == -1) {
@@ -498,6 +497,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
 
     switch (papdu->asduh.type) {
       case M_SP_NA_1: { // 1: DIGITAL SINGLE
+        char logpointbuf[15000] = "";
         unsigned int addr24 = 0;
         iec_type1* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
@@ -530,15 +530,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           if (mLog.isLogging()) {
             char buf[100];
             sprintf(buf, "%s%s%s%s%s", pobj->sp ? "on " : "off ", pobj->bl ? "bl " : "", pobj->nt ? "nt " : "", pobj->sb ? "sb " : "", pobj->iv ? "iv " : "");
-            LogPoint(int(piecarr[i].address), double(piecarr[i].value), buf, nullptr);
+            LogPoint(logpointbuf, int(piecarr[i].address), double(piecarr[i].value), buf, nullptr);
           }
         }
-        LogPoint(-1, 0, nullptr, nullptr);
+        LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
         dataIndication(piecarr, papdu->asduh.num);
         delete[] piecarr;
       }
       break;
       case M_DP_NA_1: { // 3: DIGITAL DOUBLE
+        char logpointbuf[15000] = "";
         unsigned int addr24 = 0;
         iec_type3* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
@@ -572,15 +573,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
             char buf[100];
             static const char* dblmsg[] = { "tra ", "off ", "on ", "ind " };
             sprintf(buf, "%s%s%s%s%s", dblmsg[pobj->dp], pobj->bl ? "bl " : "", pobj->nt ? "nt " : "", pobj->sb ? "sb " : "", pobj->iv ? "iv " : "");
-            LogPoint(int(piecarr[i].address), double(piecarr[i].value), buf, nullptr);
+            LogPoint(logpointbuf, int(piecarr[i].address), double(piecarr[i].value), buf, nullptr);
           }
         }
-        LogPoint(-1, 0, nullptr, nullptr);
+        LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
         dataIndication(piecarr, papdu->asduh.num);
         delete[] piecarr;
       }
       break;
       case M_ST_NA_1: { // 5: step position
+        char logpointbuf[15000] = "";
         unsigned int addr24 = 0;
         iec_type5* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
@@ -614,15 +616,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           if (mLog.isLogging()) {
             char buf[100];
             sprintf(buf, "%s%s%s%s%s%s", pobj->t ? "t " : "", pobj->ov ? "ov " : "", pobj->bl ? "bl " : "", pobj->nt ? "nt " : "", pobj->sb ? "sb " : "", pobj->iv ? "iv " : "");
-            LogPoint(int(piecarr[i].address), double(piecarr[i].value), buf, nullptr);
+            LogPoint(logpointbuf, int(piecarr[i].address), double(piecarr[i].value), buf, nullptr);
           }
         }
-        LogPoint(-1, 0, nullptr, nullptr);
+        LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
         dataIndication(piecarr, papdu->asduh.num);
         delete[] piecarr;
       }
       break;
       case M_ME_NA_1: { // 9: ANALOGIC NORMALIZED
+        char logpointbuf[15000] = "";
         unsigned int addr24 = 0;
         iec_type9* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
@@ -655,15 +658,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           if (mLog.isLogging()) {
             char buf[100];
             sprintf(buf, "%s%s%s%s%s", pobj->ov ? "ov " : "", pobj->bl ? "bl " : "", pobj->nt ? "nt " : "", pobj->sb ? "sb " : "", pobj->iv ? "iv " : "");
-            LogPoint(int(piecarr[i].address), double(piecarr[i].value), buf, nullptr);
+            LogPoint(logpointbuf, int(piecarr[i].address), double(piecarr[i].value), buf, nullptr);
           }
         }
-        LogPoint(-1, 0, nullptr, nullptr);
+        LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
         dataIndication(piecarr, papdu->asduh.num);
         delete[] piecarr;
       }
       break;
       case M_ME_NB_1: { // 11: ANALOGIC CONVERTED
+        char logpointbuf[15000] = "";
         unsigned int addr24 = 0;
         iec_type11* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
@@ -696,15 +700,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           if (mLog.isLogging()) {
             char buf[100];
             sprintf(buf, "%s%s%s%s%s", pobj->ov ? "ov " : "", pobj->bl ? "bl " : "", pobj->nt ? "nt " : "", pobj->sb ? "sb " : "", pobj->iv ? "iv " : "");
-            LogPoint(int(piecarr[i].address), double(piecarr[i].value), buf, nullptr);
+            LogPoint(logpointbuf, int(piecarr[i].address), double(piecarr[i].value), buf, nullptr);
           }
         }
-        LogPoint(-1, 0, nullptr, nullptr);
+        LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
         dataIndication(piecarr, papdu->asduh.num);
         delete[] piecarr;
       }
       break;
       case M_ME_NC_1: { // 13: ANALOGIC FLOATING POINT
+        char logpointbuf[15000] = "";
         unsigned int addr24 = 0;
         iec_type13* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
@@ -737,15 +742,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           if (mLog.isLogging()) {
             char buf[100];
             sprintf(buf, "%s%s%s%s%s", pobj->ov ? "ov " : "", pobj->bl ? "bl " : "", pobj->nt ? "nt " : "", pobj->sb ? "sb " : "", pobj->iv ? "iv " : "");
-            LogPoint(int(piecarr[i].address), double(piecarr[i].value), buf, nullptr);
+            LogPoint(logpointbuf, int(piecarr[i].address), double(piecarr[i].value), buf, nullptr);
           }
         }
-        LogPoint(-1, 0, nullptr, nullptr);
+        LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
         dataIndication(piecarr, papdu->asduh.num);
         delete[] piecarr;
       }
       break;
       case M_SP_TB_1: { // 30:  DIGITAL SINGLE WITH LONG TIME TAG
+        char logpointbuf[15000] = "";
         unsigned int addr24 = 0;
         iec_type30* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
@@ -786,15 +792,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           if (mLog.isLogging()) {
             char buf[100];
             sprintf(buf, "%s%s%s%s%s", pobj->sp ? "on " : "off ", pobj->bl ? "bl " : "", pobj->nt ? "nt " : "", pobj->sb ? "sb " : "", pobj->iv ? "iv " : "");
-            LogPoint(int(piecarr[i].address), double(piecarr[i].value), buf, &piecarr[i].timetag);
+            LogPoint(logpointbuf, int(piecarr[i].address), double(piecarr[i].value), buf, &piecarr[i].timetag);
           }
         }
-        LogPoint(-1, 0, nullptr, nullptr);
+        LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
         dataIndication(piecarr, papdu->asduh.num);
         delete[] piecarr;
       }
       break;
       case M_DP_TB_1: { // 31: DIGITAL DOUBLE WITH LONG TIME TAG
+        char logpointbuf[15000] = "";
         unsigned int addr24 = 0;
         iec_type31* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
@@ -836,15 +843,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
             char buf[100];
             static const char* dblmsg[] = { "tra ", "off ", "on ", "ind " };
             sprintf(buf, "%s%s%s%s%s", dblmsg[pobj->dp], pobj->bl ? "bl " : "", pobj->nt ? "nt " : "", pobj->sb ? "sb " : "", pobj->iv ? "iv " : "");
-            LogPoint(int(piecarr[i].address), double(piecarr[i].value), buf, &piecarr[i].timetag);
+            LogPoint(logpointbuf, int(piecarr[i].address), double(piecarr[i].value), buf, &piecarr[i].timetag);
           }
         }
-        LogPoint(-1, 0, nullptr, nullptr);
+        LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
         dataIndication(piecarr, papdu->asduh.num);
         delete[] piecarr;
       }
       break;
       case M_ST_TB_1: { // 32: TAP WITH TIME TAG
+        char logpointbuf[15000] = "";
         unsigned int addr24 = 0;
         iec_type32* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
@@ -886,15 +894,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           if (mLog.isLogging()) {
             char buf[100];
             sprintf(buf, "%s%s%s%s%s%s", pobj->t ? "t " : "", pobj->ov ? "ov " : "", pobj->bl ? "bl " : "", pobj->nt ? "nt " : "", pobj->sb ? "sb " : "", pobj->iv ? "iv " : "");
-            LogPoint(int(piecarr[i].address), double(piecarr[i].value), buf, &piecarr[i].timetag);
+            LogPoint(logpointbuf, int(piecarr[i].address), double(piecarr[i].value), buf, &piecarr[i].timetag);
           }
         }
-        LogPoint(-1, 0, nullptr, nullptr);
+        LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
         dataIndication(piecarr, papdu->asduh.num);
         delete[] piecarr;
       }
       break;
       case M_BO_NA_1: { // 7 bitstring
+        char logpointbuf[15000] = "";
         unsigned int addr24 = 0;
         iec_type7* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
@@ -928,15 +937,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           if (mLog.isLogging()) {
             char buf[100];
             sprintf(buf, "%s%s%s%s%s", pobj->ov ? "ov " : "", pobj->bl ? "bl " : "", pobj->nt ? "nt " : "", pobj->sb ? "sb " : "", pobj->iv ? "iv " : "");
-            LogPoint(int(piecarr[i].address), double(piecarr[i].bsi), buf, nullptr);
+            LogPoint(logpointbuf, int(piecarr[i].address), double(piecarr[i].bsi), buf, nullptr);
           }
         }
-        LogPoint(-1, 0, nullptr, nullptr);
+        LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
         dataIndication(piecarr, papdu->asduh.num);
         delete[] piecarr;
       }
       break;
       case M_BO_TB_1: { // 33 bitstring with time tag
+        char logpointbuf[15000] = "";
         unsigned int addr24 = 0;
         iec_type33* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
@@ -978,15 +988,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           if (mLog.isLogging()) {
             char buf[100];
             sprintf(buf, "%s%s%s%s%s", pobj->ov ? "ov " : "", pobj->bl ? "bl " : "", pobj->nt ? "nt " : "", pobj->sb ? "sb " : "", pobj->iv ? "iv " : "");
-            LogPoint(int(piecarr[i].address), double(piecarr[i].bsi), buf, &piecarr[i].timetag);
+            LogPoint(logpointbuf, int(piecarr[i].address), double(piecarr[i].bsi), buf, &piecarr[i].timetag);
           }
         }
-        LogPoint(-1, 0, nullptr, nullptr);
+        LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
         dataIndication(piecarr, papdu->asduh.num);
         delete[] piecarr;
       }
       break;
       case M_ME_TD_1: { //34 MEASURED VALUE, NORMALIZED WITH TIME TAG
+        char logpointbuf[15000] = "";
         unsigned int addr24 = 0;
         iec_type34* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
@@ -1027,15 +1038,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           if (mLog.isLogging()) {
             char buf[100];
             sprintf(buf, "%s%s%s%s%s", pobj->ov ? "ov " : "", pobj->bl ? "bl " : "", pobj->nt ? "nt " : "", pobj->sb ? "sb " : "", pobj->iv ? "iv " : "");
-            LogPoint(int(piecarr[i].address), double(piecarr[i].value), buf, &piecarr[i].timetag);
+            LogPoint(logpointbuf, int(piecarr[i].address), double(piecarr[i].value), buf, &piecarr[i].timetag);
           }
         }
-        LogPoint(-1, 0, nullptr, nullptr);
+        LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
         dataIndication(piecarr, papdu->asduh.num);
         delete[] piecarr;
       }
       break;
       case M_ME_TE_1: { //35 MEASURED VALUE, SCALED WITH TIME TAG
+        char logpointbuf[15000] = "";
         unsigned int addr24 = 0;
         iec_type35* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
@@ -1076,15 +1088,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           if (mLog.isLogging()) {
             char buf[100];
             sprintf(buf, "%s%s%s%s%s", pobj->ov ? "ov " : "", pobj->bl ? "bl " : "", pobj->nt ? "nt " : "", pobj->sb ? "sb " : "", pobj->iv ? "iv " : "");
-            LogPoint(int(piecarr[i].address), double(piecarr[i].value), buf, &piecarr[i].timetag);
+            LogPoint(logpointbuf, int(piecarr[i].address), double(piecarr[i].value), buf, &piecarr[i].timetag);
           }
         }
-        LogPoint(-1, 0, nullptr, nullptr);
+        LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
         dataIndication(piecarr, papdu->asduh.num);
         delete[] piecarr;
       }
       break;
       case M_ME_TF_1: { // 36 MEASURED VALUE, FLOATING POINT WITH TIME TAG
+        char logpointbuf[15000] = "";
         unsigned int addr24 = 0;
         iec_type36* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
@@ -1125,15 +1138,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           if (mLog.isLogging()) {
             char buf[100];
             sprintf(buf, "%s%s%s%s%s", pobj->ov ? "ov " : "", pobj->bl ? "bl " : "", pobj->nt ? "nt " : "", pobj->sb ? "sb " : "", pobj->iv ? "iv " : "");
-            LogPoint(int(piecarr[i].address), double(piecarr[i].value), buf, &piecarr[i].timetag);
+            LogPoint(logpointbuf, int(piecarr[i].address), double(piecarr[i].value), buf, &piecarr[i].timetag);
           }
         }
-        LogPoint(-1, 0, nullptr, nullptr);
+        LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
         dataIndication(piecarr, papdu->asduh.num);
         delete[] piecarr;
       }
       break;
       case M_IT_NA_1: { // 15 = integrated totals without time tag
+        char logpointbuf[15000] = "";
         unsigned int addr24 = 0;
         iec_type15* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
@@ -1166,15 +1180,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           if (mLog.isLogging()) {
             char buf[100];
             sprintf(buf, "%s%s%s%s%u", pobj->ca ? "ca " : "", pobj->cy ? "cy " : "", pobj->iv ? "iv " : "", "sq=", pobj->sq);
-            LogPoint(int(piecarr[i].address), double(piecarr[i].bcr), buf, nullptr);
+            LogPoint(logpointbuf, int(piecarr[i].address), double(piecarr[i].bcr), buf, nullptr);
           }
         }
-        LogPoint(-1, 0, nullptr, nullptr);
+        LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
         dataIndication(piecarr, papdu->asduh.num);
         delete[] piecarr;
       }
       break;
       case M_IT_TB_1: { // 37 = integrated totals with time tag
+        char logpointbuf[15000] = "";
         unsigned int addr24 = 0;
         iec_type37* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
@@ -1215,10 +1230,10 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           if (mLog.isLogging()) {
             char buf[100];
             sprintf(buf, "%s%s%s%s%u", pobj->ca ? "ca " : "", pobj->cy ? "cy " : "", pobj->iv ? "iv " : "", "sq=", pobj->sq);
-            LogPoint(int(piecarr[i].address), double(piecarr[i].bcr), buf, &piecarr[i].timetag);
+            LogPoint(logpointbuf, int(piecarr[i].address), double(piecarr[i].bcr), buf, &piecarr[i].timetag);
           }
         }
-        LogPoint(-1, 0, nullptr, nullptr);
+        LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
         dataIndication(piecarr, papdu->asduh.num);
         delete[] piecarr;
       }

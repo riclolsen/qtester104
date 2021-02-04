@@ -40,8 +40,8 @@
 
 using namespace std;
 
-#define QTESTER_VERSION "v2.1"
-#define QTESTER_COPYRIGHT "Copyright © 2010-2019 Ricardo Lastra Olsen"
+#define QTESTER_VERSION "v2.2"
+#define QTESTER_COPYRIGHT "Copyright © 2010-2021 Ricardo Lastra Olsen"
 #define CURDIRINIFILENAME "/qtester104.ini"
 #define CONFDIRINIFILENAME "../conf/qtester104.ini"
 
@@ -712,7 +712,6 @@ void MainWindow::slot_commandActRespIndication(iec_obj* obj) {
   char buf[1000];
   char buftt[1000];
   int rw = -1;
-  bool inserted = false;
   QTableWidgetItem* pitem;
   static const char* pnmsg[] = { "pos ", "neg "};
   static const char* selmsg[] = { "exe ", "sel "};
@@ -721,7 +720,7 @@ void MainWindow::slot_commandActRespIndication(iec_obj* obj) {
   static const char* qumsg[] = { "uns ", "shp ", "lop ", "per ", "res " };
   static const char* rcsmsg[] = { "na0 ", "dec ", "inc ", "na3 " };
   static const char* kpamsg[] = { "unu ", "thr ", "fil ", "lli ", "hli ", "res " };
-  static const char* qpamsg[] = { "unu ", "gen ", "obj ", "trm ", "res " };
+  // static const char* qpamsg[] = { "unu ", "gen ", "obj ", "trm ", "res " };
 
   if (obj->address == 0)
     return;
@@ -781,8 +780,6 @@ void MainWindow::slot_commandActRespIndication(iec_obj* obj) {
       ui->twPontos->setItem(rw, 7, newItem);
       newItem->setFlags(Qt::ItemIsSelectable);
       mapPtItem_ColTimeTag[std::make_pair(obj->ca, obj->address)] = newItem;
-
-      inserted = true;
     }
 
     sprintf(buf, "%9.3f", double(obj->value));

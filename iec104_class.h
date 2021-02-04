@@ -214,7 +214,7 @@ class iec104_class {
 
  protected:
   void LogFrame(char* frame, int size, bool is_send);
-  void LogPoint(int address, double val, char* qualifier, cp56time2a* timetag);
+  void LogPoint(char* buf, int address, double val, char* qualifier, cp56time2a* timetag);
   void parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond = true);  // parse APDU, ( accountandrespond == false : process the apdu out of the normal handshake )
   char* trim(char* s);
 
