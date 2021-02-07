@@ -197,6 +197,7 @@ class iec104_class {
   int tout_supervisory;  // countdown to send supervisory window control
   int tout_gi; // countdown to send general interrogation
   int tout_testfr; // countdown to send test frame
+  bool broken_msg = false;
   bool connectedTCP; // tcp connection state
   bool seq_order_check; // if set: test message order, disconnect if out of order
   unsigned char masterAddress; // master link address (primary address, originator address, oa)

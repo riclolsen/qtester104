@@ -251,14 +251,13 @@ void iec104_class::sendStartDTACT() {
 
 // tcp packet ready to be read from connection with the iec104 slave
 void iec104_class::packetReadyTCP() {
-  static bool broken_msg = false;
-  static iec_apdu apdu;
+  iec_apdu apdu;
   unsigned char* br;
   br = reinterpret_cast<unsigned char*>(&apdu);
   int bytesrec;
   unsigned char byt;
   unsigned char len;
-  static char buflog[10000];
+  char buflog[10000];
 
   while (true) {
 
@@ -342,7 +341,7 @@ void iec104_class::packetReadyTCP() {
 
 
 void iec104_class::LogFrame(char* frame, int size, bool is_send) {
-  static char buflog[10000];
+  char buflog[10000];
   char* cp = frame;
 
   if (mLog.isLogging()) {

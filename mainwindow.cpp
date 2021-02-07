@@ -40,7 +40,7 @@
 
 using namespace std;
 
-#define QTESTER_VERSION "v2.2"
+#define QTESTER_VERSION "v2.3"
 #define QTESTER_COPYRIGHT "Copyright © 2010-2021 Ricardo Lastra Olsen"
 #define CURDIRINIFILENAME "/qtester104.ini"
 #define CONFDIRINIFILENAME "../conf/qtester104.ini"
@@ -1004,7 +1004,7 @@ void MainWindow::on_pbCopyVals_clicked() {
 }
 
 void MainWindow::I104M_processPoints(iec_obj* obj, unsigned numpoints) {
-  static t_msgsupsq msg;
+  t_msgsupsq msg;
 
   switch (obj->type) {
     case iec104_class::M_DP_TB_1: { // double state with time tag
