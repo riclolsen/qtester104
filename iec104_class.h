@@ -226,6 +226,8 @@ class iec104_class {
 
   // ---- pure virtual funcions, user defined on derived class (mandatory)---
 
+  // wait milliseconds for data bytes
+  virtual void waitBytes(int bytes, int msTout) = 0;
   // make tcp connection, user provided
   virtual void connectTCP() = 0;
   // tcp disconnect, user provided

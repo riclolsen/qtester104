@@ -256,7 +256,7 @@ void iec104_class::packetReadyTCP() {
   br = reinterpret_cast<unsigned char*>(&apdu);
   int bytesrec;
   unsigned char byt;
-  unsigned char len;
+  int len;
   char buflog[10000];
 
   while (true) {
@@ -281,11 +281,25 @@ void iec104_class::packetReadyTCP() {
       continue;
     }
 
+    waitBytes(len, 500);
     bytesrec = readTCP(reinterpret_cast<char*>(br + 2), len); // read the remaining of the apdu
     if (bytesrec == 0) {
       mLog.pushMsg("R--> Broken apdu");
       broken_msg = true;
       return;
+    } else if (bytesrec < len) {
+      int missing = len - bytesrec;
+      sprintf(buflog, "R--> There should be more to read (%d of %d): ", missing, len);
+      mLog.pushMsg(buflog);
+      waitBytes(missing, 500);
+      int bytesrec2 = readTCP(reinterpret_cast<char*>(br + 2 + bytesrec), missing); // read the remaining of the apdu
+      sprintf(buflog, "R--> Readed more %d", bytesrec2);
+      mLog.pushMsg(buflog);
+      if (bytesrec2 != missing) {
+        mLog.pushMsg("R--> Broken apdu!");
+        broken_msg = true;
+        return;
+      }
     }
 
     //if ( apdu.asduh.ca != slaveAddress && apdu.asduh.ca != slaveASDUAddrCmd && len>4 )
@@ -298,7 +312,7 @@ void iec104_class::packetReadyTCP() {
     broken_msg = false;
 
     if (mLog.isLogging()) {
-      sprintf(buflog, "R--> %03d: ", int(len) + 2);
+      sprintf(buflog, "R--> %03d: ", len + 2);
       int lim = 100;
       for (int i = 0; i < len + 2 && i < lim; i++) { // log up to 50 caracteres
         sprintf(buflog + strlen(buflog), "%02x ", br[i]);
