@@ -144,7 +144,7 @@ MainWindow::MainWindow(QWidget* parent)
     on_pbConnect_clicked();
 
   QStringList colunas;
-  colunas << "Address" << "CA" << "Value" << "ASDU" << "Cause" << "Flags" << "Count" << "TimeTag";
+  colunas << "Address" << "CA" << "Value" << "Type" << "Cause" << "Flags" << "Count" << "TimeTag";
   ui->twPontos->setHorizontalHeaderLabels(colunas);
 
   tmLogMsg->start(500);
