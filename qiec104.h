@@ -1,6 +1,6 @@
 /*
  * This software implements an IEC 60870-5-104 protocol tester.
- * Copyright © 2010-2017 Ricardo L. Olsen
+ * Copyright © 2010-2022 Ricardo L. Olsen
  *
  * Disclaimer
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
@@ -31,43 +31,45 @@
 #define QIEC104_H
 
 #include <QObject>
-#include <QTimer>
 #include <QThread>
+#include <QTimer>
 #include <QtNetwork/QTcpSocket>
 #include <iec104_class.h>
 
 class QIec104 : public QObject, public iec104_class {
   Q_OBJECT
 
- public:
-  explicit QIec104(QObject* parent = 0);
+public:
+  explicit QIec104(QObject *parent = 0);
   ~QIec104();
-  int SendCommands; // 1 = allow sending commands, 0 = don't send commands
-  int ForcePrimary; // 1 = force primary (cant't stay secondary) , 0 = can be secondary
-  QTimer* tmKeepAlive; // 1 second timer
-  QTcpSocket* tcps; // socket for iec104 (tcp)
+  int SendCommands;    // 1 = allow sending commands, 0 = don't send commands
+  int ForcePrimary;    // 1 = force primary (cant't stay secondary) , 0 = can be
+                       // secondary
+  QTimer *tmKeepAlive; // 1 second timer
+  QTcpSocket *tcps;    // socket for iec104 (tcp)
   void terminate();
   void disable_connect();
   void enable_connect();
 
- signals:
-  void signal_dataIndication(iec_obj* obj, unsigned numpoints);
+signals:
+  void signal_dataIndication(iec_obj *obj, unsigned numpoints);
   void signal_interrogationActConfIndication();
   void signal_interrogationActTermIndication();
   void signal_tcp_connect();
   void signal_tcp_disconnect();
-  void signal_commandActRespIndication(iec_obj* obj);
+  void signal_commandActRespIndication(iec_obj *obj);
 
- public slots:
+public slots:
   void slot_tcpdisconnect(); // tcp disconnect for iec104
 
- private slots:
-  void slot_tcpconnect(); // tcp connect for iec104
+private slots:
+  void slot_tcpconnect();     // tcp connect for iec104
   void slot_tcpreadytoread(); // ready to read data on iec104 tcp socket
-  void slot_tcperror(QAbstractSocket::SocketError socketError);   // show errors of tcp
-  void slot_keep_alive(); // timer de 1s
+  void
+  slot_tcperror(QAbstractSocket::SocketError socketError); // show errors of tcp
+  void slot_keep_alive();                                  // timer de 1s
 
- private:
+private:
   QThread tcpThread;
 
   // redefine for iec104_class
@@ -75,15 +77,14 @@ class QIec104 : public QObject, public iec104_class {
   int bytesAvailableTCP();
   void connectTCP();
   void disconnectTCP();
-  int readTCP(char* buf, int szmax);
-  void sendTCP(char* data, int sz);
+  int readTCP(char *buf, int szmax);
+  void sendTCP(char *data, int sz);
   void interrogationActConfIndication();
   void interrogationActTermIndication();
-  void commandActRespIndication(iec_obj* obj);
-  void dataIndication(iec_obj* obj, unsigned numpoints);
+  void commandActRespIndication(iec_obj *obj);
+  void dataIndication(iec_obj *obj, unsigned numpoints);
   bool mEnding;
   bool mAllowConnect;
 };
-
 
 #endif // QIEC104_H

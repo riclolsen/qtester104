@@ -1,6 +1,6 @@
 /*
  * This software implements an IEC 60870-5-104 protocol tester.
- * Copyright © 2010-2017 Ricardo L. Olsen
+ * Copyright © 2010-2022 Ricardo L. Olsen
  *
  * Disclaimer
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
@@ -41,6 +41,123 @@ using namespace std;
 iec104_class::iec104_class() {
   strncpy(slaveIP, "", 20);
 
+  mapTiStr[0] = "M_UNDEF";
+  mapTiStr[1] = "M_SP_NA_1";
+  mapTiStr[2] = "M_SP_TA_1";
+  mapTiStr[3] = "M_DP_NA_1";
+  mapTiStr[4] = "M_DP_TA_1";
+  mapTiStr[5] = "M_ST_NA_1";
+  mapTiStr[6] = "M_ST_TA_1";
+  mapTiStr[7] = "M_BO_NA_1";
+  mapTiStr[8] = "M_BO_TA_1";
+  mapTiStr[9] = "M_ME_NA_1";
+  mapTiStr[10] = "M_ME_TA_1";
+  mapTiStr[11] = "M_ME_NB_1";
+  mapTiStr[12] = "M_ME_TB_1";
+  mapTiStr[13] = "M_ME_NC_1";
+  mapTiStr[14] = "M_ME_TC_1";
+  mapTiStr[15] = "M_IT_NA_1";
+  mapTiStr[16] = "M_IT_TA_1";
+  mapTiStr[17] = "M_EP_TA_1";
+  mapTiStr[18] = "M_EP_TB_1";
+  mapTiStr[19] = "M_EP_TC_1";
+  mapTiStr[20] = "M_PS_NA_1";
+  mapTiStr[21] = "M_ME_ND_1";
+  mapTiStr[30] = "M_SP_TB_1";
+  mapTiStr[31] = "M_DP_TB_1";
+  mapTiStr[32] = "M_ST_TB_1";
+  mapTiStr[33] = "M_BO_TB_1";
+  mapTiStr[34] = "M_ME_TD_1";
+  mapTiStr[35] = "M_ME_TE_1";
+  mapTiStr[36] = "M_ME_TF_1";
+  mapTiStr[37] = "M_IT_TB_1";
+  mapTiStr[38] = "M_EP_TD_1";
+  mapTiStr[39] = "M_EP_TE_1";
+  mapTiStr[40] = "M_EP_TF_1";
+  mapTiStr[45] = "C_SC_NA_1";
+  mapTiStr[46] = "C_DC_NA_1";
+  mapTiStr[47] = "C_RC_NA_1";
+  mapTiStr[48] = "C_SE_NA_1";
+  mapTiStr[49] = "C_SE_NB_1";
+  mapTiStr[50] = "C_SE_NC_1";
+  mapTiStr[51] = "C_BO_NA_1";
+  mapTiStr[58] = "C_SC_TA_1";
+  mapTiStr[59] = "C_DC_TA_1";
+  mapTiStr[60] = "C_RC_TA_1";
+  mapTiStr[61] = "C_SE_TA_1";
+  mapTiStr[62] = "C_SE_TB_1";
+  mapTiStr[63] = "C_SE_TC_1";
+  mapTiStr[64] = "C_BO_TA_1";
+  mapTiStr[70] = "M_EI_NA_1";
+  mapTiStr[100] = "C_IC_NA_1";
+  mapTiStr[101] = "C_CI_NA_1";
+  mapTiStr[102] = "C_RD_NA_1";
+  mapTiStr[103] = "C_CS_NA_1";
+  mapTiStr[104] = "C_TS_NA_1";
+  mapTiStr[105] = "C_RP_NA_1";
+  mapTiStr[106] = "C_CD_NA_1";
+  mapTiStr[107] = "C_TS_TA_1";
+  mapTiStr[110] = "P_ME_NA_1";
+  mapTiStr[111] = "P_ME_NB_1";
+  mapTiStr[112] = "P_ME_NC_1";
+  mapTiStr[113] = "P_AC_NA_1";
+  mapTiStr[120] = "F_FR_NA_1";
+  mapTiStr[121] = "F_SR_NA_1";
+  mapTiStr[122] = "F_SC_NA_1";
+  mapTiStr[123] = "F_LS_NA_1";
+  mapTiStr[124] = "F_FA_NA_1";
+  mapTiStr[125] = "F_SG_NA_1";
+  mapTiStr[126] = "F_DR_TA_1";
+
+  mapCauseStr[0] = "UNUSED";
+  mapCauseStr[1] = "CYCLIC";
+  mapCauseStr[2] = "BACKGND";
+  mapCauseStr[3] = "SPONT";
+  mapCauseStr[4] = "INIT";
+  mapCauseStr[5] = "REQ";
+  mapCauseStr[6] = "ACT";
+  mapCauseStr[7] = "ACT_CON";
+  mapCauseStr[8] = "DEACT";
+  mapCauseStr[9] = "DEACT_CON";
+  mapCauseStr[10] = "ACT_TERM";
+  mapCauseStr[11] = "RETREM";
+  mapCauseStr[12] = "RETLOC";
+  mapCauseStr[13] = "FILE";
+  mapCauseStr[14] = "COT_14";
+  mapCauseStr[15] = "COT_15";
+  mapCauseStr[16] = "COT_16";
+  mapCauseStr[17] = "COT_17";
+  mapCauseStr[18] = "COT_18";
+  mapCauseStr[19] = "COT_19";
+  mapCauseStr[20] = "INROGEN";
+  mapCauseStr[21] = "INRO1";
+  mapCauseStr[22] = "INRO2";
+  mapCauseStr[23] = "INRO3";
+  mapCauseStr[24] = "INRO4";
+  mapCauseStr[25] = "INRO5";
+  mapCauseStr[26] = "INRO6";
+  mapCauseStr[27] = "INRO7";
+  mapCauseStr[28] = "INRO8";
+  mapCauseStr[29] = "INRO9";
+  mapCauseStr[30] = "INRO10";
+  mapCauseStr[31] = "INRO11";
+  mapCauseStr[32] = "INRO12";
+  mapCauseStr[33] = "INRO13";
+  mapCauseStr[34] = "INRO14";
+  mapCauseStr[35] = "INRO15";
+  mapCauseStr[36] = "INRO16";
+  mapCauseStr[37] = "REQCOGEN";
+  mapCauseStr[38] = "REQCO1";
+  mapCauseStr[39] = "REQCO2";
+  mapCauseStr[40] = "REQCO3";
+  mapCauseStr[41] = "REQCO4";
+  mapCauseStr[42] = "COT_42";
+  mapCauseStr[43] = "COT_43";
+  mapCauseStr[44] = "UNKNOWN_TYPE";
+  mapCauseStr[45] = "UNKNOWN_CAUSE";
+  mapCauseStr[46] = "UNKNOWN_ASDU_ADDR";
+  mapCauseStr[47] = "UNKNOWN_OBJ_ADDR";
+
   Port = 2404;
 
   msg_supervisory = true;
@@ -59,6 +176,28 @@ iec104_class::iec104_class() {
   slaveASDUAddrCmd = 0;
   GIObjectCnt = 0;
   gi_period = 5 * 60 + 30;
+}
+
+string iec104_class::asduTiStr(int ti) {
+  string s = "";
+  map<int, string>::const_iterator iter = mapTiStr.find(ti);
+  if (iter != mapTiStr.end()) {
+    s = iter->second;
+  }
+  if (s == "" && ti >= 127)
+    s = "USER_RESERVED";
+  else if (s == "" && ti < 127)
+    s = "STD_RESERVED";
+  return s;
+}
+
+string iec104_class::causeStr(int cause) {
+  string s = "COT_?";
+  map<int, string>::const_iterator iter = mapCauseStr.find(cause);
+  if (iter != mapCauseStr.end()) {
+    s = iter->second;
+  }
+  return s;
 }
 
 void iec104_class::disableSequenceOrderCheck() {
@@ -199,7 +338,34 @@ void iec104_class::solicitGI() {
   wapdu.dados[3] = 0x14;
   sendTCP(reinterpret_cast<char*>(&wapdu), 16);
   VS += 2;
-  mLog.pushMsg("     INTERROGATION ");
+  mLog.pushMsg("    GENERAL INTERROGATION ");
+  tout_gi = gi_retry_time;
+}
+
+void iec104_class::solicitInterrogation(char group) {
+  iec_apdu wapdu;
+
+  wapdu.start = START;
+  wapdu.length = 0x0E;
+  wapdu.NS = VS;
+  wapdu.NR = VR;
+  wapdu.asduh.type = INTERROGATION;
+  wapdu.asduh.num = 1;
+  wapdu.asduh.sq = 0;
+  wapdu.asduh.cause = ACTIVATION;
+  wapdu.asduh.t = 0;
+  wapdu.asduh.pn = 0;
+  wapdu.asduh.oa = masterAddress;
+  wapdu.asduh.ca = slaveAddress;
+  wapdu.dados[0] = 0x00;
+  wapdu.dados[1] = 0x00;
+  wapdu.dados[2] = 0x00;
+  wapdu.dados[3] = group;
+  sendTCP(reinterpret_cast<char*>(&wapdu), 16);
+  VS += 2;
+  char buflog[1000];
+  sprintf(buflog, "     INTERROGATION GROUP %d", group);
+  mLog.pushMsg(buflog);
   tout_gi = gi_retry_time;
 }
 
@@ -327,30 +493,6 @@ void iec104_class::packetReadyTCP() {
     if (bytesAvailableTCP() == 0)
       break;
   }
-
-  /*
-      char buf[5000];
-      buf[0]=0;
-
-      sprintf(buf+strlen(buf), "R--> ");
-      bytesrec=readTCP((char*)br,2); // start and length
-      if ( br[0]== START) // valid frames must begin with START
-      {
-          bytesrec=readTCP((char*)br+2,br[1]); // read the remaining of the frame
-          sprintf (buf+strlen(buf), "%03d: ", bytesrec+2);
-          int i=0;
-          for (; i< bytesrec+2 && i<25 ; i++) // prints up to 25 chars
-              sprintf (buf+strlen(buf), "%02x ", br[i]);
-          mLog.pushMsg(buf);
-          buf[0]=0;
-          parseAPDU(&apdu, bytesrec+2);
-      }
-      else
-      {
-          mLog.pushMsg("R--> ERROR: INVALID FRAME");
-          bytesrec=readTCP((char*)br,sizeof(apdu)); // consider garbage the remaining data from the frame
-      }
-  */
 }
 
 
@@ -496,16 +638,22 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
     }
 
     oss.str("");
-    oss << "     CA "
+    oss << "     OA "
+        << unsigned(papdu->asduh.oa)
+        << " CA "
         << unsigned(papdu->asduh.ca)
-        << " TYPE "
-        << unsigned(papdu->asduh.type)
+        << " TI TYPE "
+        << unsigned(papdu->asduh.type) << ":" << asduTiStr(papdu->asduh.type)
         << " CAUSE "
-        << int(papdu->asduh.cause)
+        << int(papdu->asduh.cause) << ":" << causeStr(papdu->asduh.cause)
         << " SQ "
         << unsigned(papdu->asduh.sq)
-        << " NUM "
-        << unsigned(papdu->asduh.num);
+        << " ITEMS "
+        << unsigned(papdu->asduh.num)
+        << (papdu->asduh.pn == POSITIVE ? " POSITIVE" : " NEGATIVE")
+        << (papdu->asduh.t ? " TEST" : "");
+
+
     mLog.pushMsg(oss.str().c_str());
 
     switch (papdu->asduh.type) {
@@ -514,7 +662,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         unsigned int addr24 = 0;
         iec_type1* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
-        if (papdu->asduh.cause == 20)
+        if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
         for (int i = 0; i < papdu->asduh.num; i++) {
@@ -533,6 +681,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           piecarr[i].ca = papdu->asduh.ca;
           piecarr[i].cause = papdu->asduh.cause;
           piecarr[i].pn = papdu->asduh.pn;
+          piecarr[i].test = papdu->asduh.t;
           piecarr[i].type = papdu->asduh.type;
           piecarr[i].value = pobj->sp;
           piecarr[i].sp = pobj->sp;
@@ -556,7 +705,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         unsigned int addr24 = 0;
         iec_type3* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
-        if (papdu->asduh.cause == 20)
+        if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
         for (int i = 0; i < papdu->asduh.num; i++) {
@@ -575,6 +724,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           piecarr[i].ca = papdu->asduh.ca;
           piecarr[i].cause = papdu->asduh.cause;
           piecarr[i].pn = papdu->asduh.pn;
+          piecarr[i].test = papdu->asduh.t;
           piecarr[i].type = papdu->asduh.type;
           piecarr[i].value = pobj->dp;
           piecarr[i].dp = pobj->dp;
@@ -599,7 +749,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         unsigned int addr24 = 0;
         iec_type5* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
-        if (papdu->asduh.cause == 20)
+        if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
         for (int i = 0; i < papdu->asduh.num; i++) {
@@ -618,6 +768,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           piecarr[i].ca = papdu->asduh.ca;
           piecarr[i].cause = papdu->asduh.cause;
           piecarr[i].pn = papdu->asduh.pn;
+          piecarr[i].test = papdu->asduh.t;
           piecarr[i].type = papdu->asduh.type;
           piecarr[i].value = pobj->mv;
           piecarr[i].t = pobj->t;
@@ -642,7 +793,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         unsigned int addr24 = 0;
         iec_type9* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
-        if (papdu->asduh.cause == 20)
+        if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
         for (int i = 0; i < papdu->asduh.num; i++) {
@@ -661,6 +812,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           piecarr[i].ca = papdu->asduh.ca;
           piecarr[i].cause = papdu->asduh.cause;
           piecarr[i].pn = papdu->asduh.pn;
+          piecarr[i].test = papdu->asduh.t;
           piecarr[i].type = papdu->asduh.type;
           piecarr[i].value = pobj->mv;
           piecarr[i].ov = pobj->ov;
@@ -679,12 +831,52 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         delete[] piecarr;
       }
       break;
-      case M_ME_NB_1: { // 11: ANALOGIC CONVERTED
+      case M_ME_ND_1: { // 21: ANALOGIC NORMALIZED WITHOUT QUALITY
+		char logpointbuf[15000] = "";
+        unsigned int addr24 = 0;
+        iec_type21* pobj;
+        iec_obj* piecarr = new iec_obj [papdu->asduh.num];
+        if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
+          GIObjectCnt += papdu->asduh.num;
+
+        for (int i = 0; i < papdu->asduh.num; i++) {
+          if (papdu->asduh.sq) {
+            pobj =  &papdu->sq21.obj[i];
+            if (i == 0)
+              addr24 = papdu->sq21.ioa16 + (unsigned(papdu->sq21.ioa8) << 16);
+            else
+              addr24++;
+          } else {
+            pobj =  &papdu->nsq21[i].obj;
+            addr24 = papdu->nsq21[i].ioa16 + (unsigned(papdu->nsq21[i].ioa8) << 16);
+          }
+
+          piecarr[i].address = addr24;
+          piecarr[i].ca = papdu->asduh.ca;
+          piecarr[i].cause = papdu->asduh.cause;
+          piecarr[i].pn = papdu->asduh.pn;
+          piecarr[i].test = papdu->asduh.t;
+          piecarr[i].type = papdu->asduh.type;
+          piecarr[i].value = pobj->mv;
+          piecarr[i].ov = 0;
+          piecarr[i].bl = 0;
+          piecarr[i].nt = 0;
+          piecarr[i].sb = 0;
+          piecarr[i].iv = 0;
+          if (mLog.isLogging()) {
+            LogPoint(logpointbuf, int(piecarr[i].address), double(piecarr[i].value), nullptr, nullptr);
+          }
+        }
+        LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
+        dataIndication(piecarr, papdu->asduh.num);
+        delete[] piecarr;
+      }
+      break;      case M_ME_NB_1: { // 11: ANALOGIC CONVERTED
         char logpointbuf[15000] = "";
         unsigned int addr24 = 0;
         iec_type11* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
-        if (papdu->asduh.cause == 20)
+        if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
         for (int i = 0; i < papdu->asduh.num; i++) {
@@ -704,6 +896,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           piecarr[i].cause = papdu->asduh.cause;
           piecarr[i].pn = papdu->asduh.pn;
           piecarr[i].type = papdu->asduh.type;
+          piecarr[i].test = papdu->asduh.t;
           piecarr[i].value = pobj->mv;
           piecarr[i].ov = pobj->ov;
           piecarr[i].bl = pobj->bl;
@@ -726,7 +919,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         unsigned int addr24 = 0;
         iec_type13* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
-        if (papdu->asduh.cause == 20)
+        if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
         for (int i = 0; i < papdu->asduh.num; i++) {
@@ -745,6 +938,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           piecarr[i].ca = papdu->asduh.ca;
           piecarr[i].cause = papdu->asduh.cause;
           piecarr[i].pn = papdu->asduh.pn;
+          piecarr[i].test = papdu->asduh.t;
           piecarr[i].type = papdu->asduh.type;
           piecarr[i].value = pobj->mv;
           piecarr[i].ov = pobj->ov;
@@ -768,7 +962,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         unsigned int addr24 = 0;
         iec_type30* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
-        if (papdu->asduh.cause == 20)
+        if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
         for (int i = 0; i < papdu->asduh.num; i++) {
@@ -787,6 +981,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           piecarr[i].ca = papdu->asduh.ca;
           piecarr[i].cause = papdu->asduh.cause;
           piecarr[i].pn = papdu->asduh.pn;
+          piecarr[i].test = papdu->asduh.t;
           piecarr[i].type = papdu->asduh.type;
           piecarr[i].value = pobj->sp;
           piecarr[i].sp = pobj->sp;
@@ -818,7 +1013,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         unsigned int addr24 = 0;
         iec_type31* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
-        if (papdu->asduh.cause == 20)
+        if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
         for (int i = 0; i < papdu->asduh.num; i++) {
@@ -837,6 +1032,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           piecarr[i].ca = papdu->asduh.ca;
           piecarr[i].cause = papdu->asduh.cause;
           piecarr[i].pn = papdu->asduh.pn;
+          piecarr[i].test = papdu->asduh.t;
           piecarr[i].type = papdu->asduh.type;
           piecarr[i].value = pobj->dp;
           piecarr[i].dp = pobj->dp;
@@ -869,7 +1065,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         unsigned int addr24 = 0;
         iec_type32* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
-        if (papdu->asduh.cause == 20)
+        if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
         for (int i = 0; i < papdu->asduh.num; i++) {
@@ -888,6 +1084,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           piecarr[i].ca = papdu->asduh.ca;
           piecarr[i].cause = papdu->asduh.cause;
           piecarr[i].pn = papdu->asduh.pn;
+          piecarr[i].test = papdu->asduh.t;
           piecarr[i].type = papdu->asduh.type;
           piecarr[i].value = pobj->mv;
           piecarr[i].t = pobj->t;
@@ -915,12 +1112,91 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         delete[] piecarr;
       }
       break;
+      case M_PS_NA_1: { // Packed single point information with status change detection
+        char logpointbuf[15000] = "";
+        unsigned int addr24 = 0;
+        iec_type20* pobj;
+        iec_obj* piecarr = new iec_obj [papdu->asduh.num];
+        if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
+          GIObjectCnt += papdu->asduh.num;
+
+        for (int i = 0; i < papdu->asduh.num; i++) {
+          if (papdu->asduh.sq) {
+            pobj =  &papdu->sq20.obj[i];
+            if (i == 0)
+              addr24 = papdu->sq20.ioa16 + (unsigned(papdu->sq20.ioa8) << 16);
+            else
+              addr24++;
+          } else {
+            pobj =  &papdu->nsq20[i].obj;
+            addr24 = papdu->nsq20[i].ioa16 + (unsigned(papdu->nsq20[i].ioa8) << 16);
+          }
+
+          piecarr[i].address = addr24;
+          piecarr[i].ca = papdu->asduh.ca;
+          piecarr[i].cause = papdu->asduh.cause;
+          piecarr[i].pn = papdu->asduh.pn;
+          piecarr[i].test = papdu->asduh.t;
+          piecarr[i].type = papdu->asduh.type;
+          piecarr[i].stcd.st = pobj->stcd.st;
+          piecarr[i].stcd.cd = pobj->stcd.cd;
+          piecarr[i].value = double(pobj->stcd.st);
+          piecarr[i].ov = pobj->ov;
+          piecarr[i].bl = pobj->bl;
+          piecarr[i].nt = pobj->nt;
+          piecarr[i].sb = pobj->sb;
+          piecarr[i].iv = pobj->iv;
+          if (mLog.isLogging()) {
+            char buf[1000];
+            sprintf(buf, "%s%s%s%s%s ST %d%d%d%d %d%d%d%d %d%d%d%d %d%d%d%d CH %d%d%d%d %d%d%d%d %d%d%d%d %d%d%d%d [1-16]",
+                    pobj->ov ? "ov " : "", pobj->bl ? "bl " : "", pobj->nt ? "nt " : "", pobj->sb ? "sb " : "", pobj->iv ? "iv " : "",
+                    pobj->stcd.st1,
+                    pobj->stcd.st2,
+                    pobj->stcd.st3,
+                    pobj->stcd.st4,
+                    pobj->stcd.st5,
+                    pobj->stcd.st6,
+                    pobj->stcd.st7,
+                    pobj->stcd.st8,
+                    pobj->stcd.st9,
+                    pobj->stcd.st10,
+                    pobj->stcd.st11,
+                    pobj->stcd.st12,
+                    pobj->stcd.st13,
+                    pobj->stcd.st14,
+                    pobj->stcd.st15,
+                    pobj->stcd.st16,
+                    pobj->stcd.cd1,
+                    pobj->stcd.cd2,
+                    pobj->stcd.cd3,
+                    pobj->stcd.cd4,
+                    pobj->stcd.cd5,
+                    pobj->stcd.cd6,
+                    pobj->stcd.cd7,
+                    pobj->stcd.cd8,
+                    pobj->stcd.cd9,
+                    pobj->stcd.cd10,
+                    pobj->stcd.cd11,
+                    pobj->stcd.cd12,
+                    pobj->stcd.cd13,
+                    pobj->stcd.cd14,
+                    pobj->stcd.cd15,
+                    pobj->stcd.cd16
+                   );
+            LogPoint(logpointbuf, int(piecarr[i].address), double(piecarr[i].stcd.st), buf, nullptr);
+          }
+        }
+        LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
+        dataIndication(piecarr, papdu->asduh.num);
+        delete[] piecarr;
+      }
+      break;
       case M_BO_NA_1: { // 7 bitstring
         char logpointbuf[15000] = "";
         unsigned int addr24 = 0;
         iec_type7* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
-        if (papdu->asduh.cause == 20)
+        if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
         for (int i = 0; i < papdu->asduh.num; i++) {
@@ -939,18 +1215,52 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           piecarr[i].ca = papdu->asduh.ca;
           piecarr[i].cause = papdu->asduh.cause;
           piecarr[i].pn = papdu->asduh.pn;
+          piecarr[i].test = papdu->asduh.t;
           piecarr[i].type = papdu->asduh.type;
           piecarr[i].bsi = pobj->bsi;
-          piecarr[i].value = float(pobj->bsi);
+          piecarr[i].value = double(pobj->bsi.bsi);
           piecarr[i].ov = pobj->ov;
           piecarr[i].bl = pobj->bl;
           piecarr[i].nt = pobj->nt;
           piecarr[i].sb = pobj->sb;
           piecarr[i].iv = pobj->iv;
           if (mLog.isLogging()) {
-            char buf[100];
-            sprintf(buf, "%s%s%s%s%s", pobj->ov ? "ov " : "", pobj->bl ? "bl " : "", pobj->nt ? "nt " : "", pobj->sb ? "sb " : "", pobj->iv ? "iv " : "");
-            LogPoint(logpointbuf, int(piecarr[i].address), double(piecarr[i].bsi), buf, nullptr);
+            char buf[1000];
+            sprintf(buf, "%s%s%s%s%s ST %d%d%d%d %d%d%d%d %d%d%d%d %d%d%d%d %d%d%d%d %d%d%d% d%d%d%d %d%d%d%d [1-32]",
+                    pobj->ov ? "ov " : "", pobj->bl ? "bl " : "", pobj->nt ? "nt " : "", pobj->sb ? "sb " : "", pobj->iv ? "iv " : "",
+                    pobj->bsi.st1,
+                    pobj->bsi.st2,
+                    pobj->bsi.st3,
+                    pobj->bsi.st4,
+                    pobj->bsi.st5,
+                    pobj->bsi.st6,
+                    pobj->bsi.st7,
+                    pobj->bsi.st8,
+                    pobj->bsi.st9,
+                    pobj->bsi.st10,
+                    pobj->bsi.st11,
+                    pobj->bsi.st12,
+                    pobj->bsi.st13,
+                    pobj->bsi.st14,
+                    pobj->bsi.st15,
+                    pobj->bsi.st16,
+                    pobj->bsi.st17,
+                    pobj->bsi.st18,
+                    pobj->bsi.st19,
+                    pobj->bsi.st20,
+                    pobj->bsi.st21,
+                    pobj->bsi.st22,
+                    pobj->bsi.st23,
+                    pobj->bsi.st24,
+                    pobj->bsi.st25,
+                    pobj->bsi.st26,
+                    pobj->bsi.st27,
+                    pobj->bsi.st28,
+                    pobj->bsi.st29,
+                    pobj->bsi.st31,
+                    pobj->bsi.st32
+                   );
+            LogPoint(logpointbuf, int(piecarr[i].address), double(piecarr[i].bsi.bsi), buf, nullptr);
           }
         }
         LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
@@ -963,7 +1273,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         unsigned int addr24 = 0;
         iec_type33* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
-        if (papdu->asduh.cause == 20)
+        if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
         for (int i = 0; i < papdu->asduh.num; i++) {
@@ -982,9 +1292,10 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           piecarr[i].ca = papdu->asduh.ca;
           piecarr[i].cause = papdu->asduh.cause;
           piecarr[i].pn = papdu->asduh.pn;
+          piecarr[i].test = papdu->asduh.t;
           piecarr[i].type = papdu->asduh.type;
           piecarr[i].bsi = pobj->bsi;
-          piecarr[i].value = float(pobj->bsi);
+          piecarr[i].value = double(pobj->bsi.bsi);
           piecarr[i].ov = pobj->ov;
           piecarr[i].bl = pobj->bl;
           piecarr[i].nt = pobj->nt;
@@ -999,9 +1310,42 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           piecarr[i].timetag.iv = pobj->time.iv;
           piecarr[i].timetag.su = pobj->time.su;
           if (mLog.isLogging()) {
-            char buf[100];
-            sprintf(buf, "%s%s%s%s%s", pobj->ov ? "ov " : "", pobj->bl ? "bl " : "", pobj->nt ? "nt " : "", pobj->sb ? "sb " : "", pobj->iv ? "iv " : "");
-            LogPoint(logpointbuf, int(piecarr[i].address), double(piecarr[i].bsi), buf, &piecarr[i].timetag);
+            char buf[1000];
+            sprintf(buf, "%s%s%s%s%s ST %d%d%d%d %d%d%d%d %d%d%d%d %d%d%d%d %d%d%d%d %d%d%d% d%d%d%d %d%d%d%d [1-32]",
+                    pobj->ov ? "ov " : "", pobj->bl ? "bl " : "", pobj->nt ? "nt " : "", pobj->sb ? "sb " : "", pobj->iv ? "iv " : "",
+                    pobj->bsi.st1,
+                    pobj->bsi.st2,
+                    pobj->bsi.st3,
+                    pobj->bsi.st4,
+                    pobj->bsi.st5,
+                    pobj->bsi.st6,
+                    pobj->bsi.st7,
+                    pobj->bsi.st8,
+                    pobj->bsi.st9,
+                    pobj->bsi.st10,
+                    pobj->bsi.st11,
+                    pobj->bsi.st12,
+                    pobj->bsi.st13,
+                    pobj->bsi.st14,
+                    pobj->bsi.st15,
+                    pobj->bsi.st16,
+                    pobj->bsi.st17,
+                    pobj->bsi.st18,
+                    pobj->bsi.st19,
+                    pobj->bsi.st20,
+                    pobj->bsi.st21,
+                    pobj->bsi.st22,
+                    pobj->bsi.st23,
+                    pobj->bsi.st24,
+                    pobj->bsi.st25,
+                    pobj->bsi.st26,
+                    pobj->bsi.st27,
+                    pobj->bsi.st28,
+                    pobj->bsi.st29,
+                    pobj->bsi.st31,
+                    pobj->bsi.st32
+                   );
+            LogPoint(logpointbuf, int(piecarr[i].address), double(piecarr[i].bsi.bsi), buf, &piecarr[i].timetag);
           }
         }
         LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
@@ -1014,7 +1358,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         unsigned int addr24 = 0;
         iec_type34* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
-        if (papdu->asduh.cause == 20)
+        if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
         for (int i = 0; i < papdu->asduh.num; i++) {
@@ -1033,6 +1377,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           piecarr[i].ca = papdu->asduh.ca;
           piecarr[i].cause = papdu->asduh.cause;
           piecarr[i].pn = papdu->asduh.pn;
+          piecarr[i].test = papdu->asduh.t;
           piecarr[i].type = papdu->asduh.type;
           piecarr[i].value = pobj->mv;
           piecarr[i].ov = pobj->ov;
@@ -1064,7 +1409,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         unsigned int addr24 = 0;
         iec_type35* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
-        if (papdu->asduh.cause == 20)
+        if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
         for (int i = 0; i < papdu->asduh.num; i++) {
@@ -1083,6 +1428,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           piecarr[i].ca = papdu->asduh.ca;
           piecarr[i].cause = papdu->asduh.cause;
           piecarr[i].pn = papdu->asduh.pn;
+          piecarr[i].test = papdu->asduh.t;
           piecarr[i].type = papdu->asduh.type;
           piecarr[i].value = pobj->mv;
           piecarr[i].ov = pobj->ov;
@@ -1114,7 +1460,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         unsigned int addr24 = 0;
         iec_type36* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
-        if (papdu->asduh.cause == 20)
+        if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
         for (int i = 0; i < papdu->asduh.num; i++) {
@@ -1133,6 +1479,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           piecarr[i].ca = papdu->asduh.ca;
           piecarr[i].cause = papdu->asduh.cause;
           piecarr[i].pn = papdu->asduh.pn;
+          piecarr[i].test = papdu->asduh.t;
           piecarr[i].type = papdu->asduh.type;
           piecarr[i].value = pobj->mv;
           piecarr[i].ov = pobj->ov;
@@ -1164,7 +1511,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         unsigned int addr24 = 0;
         iec_type15* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
-        if (papdu->asduh.cause == 20)
+        if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
         for (int i = 0; i < papdu->asduh.num; i++) {
@@ -1183,9 +1530,10 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           piecarr[i].ca = papdu->asduh.ca;
           piecarr[i].cause = papdu->asduh.cause;
           piecarr[i].pn = papdu->asduh.pn;
+          piecarr[i].test = papdu->asduh.t;
           piecarr[i].type = papdu->asduh.type;
           piecarr[i].bcr = pobj->bcr;
-          piecarr[i].value = float(pobj->bcr);
+          piecarr[i].value = double(pobj->bcr);
           piecarr[i].cadj = pobj->ca;
           piecarr[i].cy = pobj->cy;
           piecarr[i].sq = pobj->sq;
@@ -1206,7 +1554,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         unsigned int addr24 = 0;
         iec_type37* pobj;
         iec_obj* piecarr = new iec_obj [papdu->asduh.num];
-        if (papdu->asduh.cause == 20)
+        if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
         for (int i = 0; i < papdu->asduh.num; i++) {
@@ -1225,9 +1573,10 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           piecarr[i].ca = papdu->asduh.ca;
           piecarr[i].cause = papdu->asduh.cause;
           piecarr[i].pn = papdu->asduh.pn;
+          piecarr[i].test = papdu->asduh.t;
           piecarr[i].type = papdu->asduh.type;
           piecarr[i].bcr = pobj->bcr;
-          piecarr[i].value = float(pobj->bcr);
+          piecarr[i].value = double(pobj->bcr);
           piecarr[i].cadj = pobj->ca;
           piecarr[i].cy = pobj->cy;
           piecarr[i].sq = pobj->sq;
@@ -1244,6 +1593,175 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
             char buf[100];
             sprintf(buf, "%s%s%s%s%u", pobj->ca ? "ca " : "", pobj->cy ? "cy " : "", pobj->iv ? "iv " : "", "sq=", pobj->sq);
             LogPoint(logpointbuf, int(piecarr[i].address), double(piecarr[i].bcr), buf, &piecarr[i].timetag);
+          }
+        }
+        LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
+        dataIndication(piecarr, papdu->asduh.num);
+        delete[] piecarr;
+      }
+      break;
+      case M_EP_TD_1: { // 38 = Event of protection equipment with CP56Time2a time tag
+        char logpointbuf[15000] = "";
+        unsigned int addr24 = 0;
+        iec_type38* pobj;
+        iec_obj* piecarr = new iec_obj [papdu->asduh.num];
+        if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
+          GIObjectCnt += papdu->asduh.num;
+
+        for (int i = 0; i < papdu->asduh.num; i++) {
+          if (papdu->asduh.sq) {
+            pobj =  &papdu->sq38.obj[i];
+            if (i == 0)
+              addr24 = papdu->sq38.ioa16 + (unsigned(papdu->sq38.ioa8) << 16);
+            else
+              addr24++;
+          } else {
+            pobj =  &papdu->nsq38[i].obj;
+            addr24 = papdu->nsq38[i].ioa16 + (unsigned(papdu->nsq38[i].ioa8) << 16);
+          }
+
+          piecarr[i].address = addr24;
+          piecarr[i].ca = papdu->asduh.ca;
+          piecarr[i].cause = papdu->asduh.cause;
+          piecarr[i].pn = papdu->asduh.pn;
+          piecarr[i].test = papdu->asduh.t;
+          piecarr[i].type = papdu->asduh.type;
+          piecarr[i].value = pobj->es;
+          piecarr[i].dp = pobj->es;
+          piecarr[i].bl = pobj->bl;
+          piecarr[i].nt = pobj->nt;
+          piecarr[i].sb = pobj->sb;
+          piecarr[i].iv = pobj->iv;
+          piecarr[i].elapsed_time = pobj->elapsed;
+          piecarr[i].timetag.mday = pobj->time.mday;
+          piecarr[i].timetag.month = pobj->time.month;
+          piecarr[i].timetag.year = pobj->time.year;
+          piecarr[i].timetag.hour = pobj->time.hour;
+          piecarr[i].timetag.min = pobj->time.min;
+          piecarr[i].timetag.msec = pobj->time.msec;
+          piecarr[i].timetag.iv = pobj->time.iv;
+          piecarr[i].timetag.su = pobj->time.su;
+          if (mLog.isLogging()) {
+            char buf[200];
+            static const char* dblmsg[] = { "ind0 ", "off ", "on ", "ind3 " };
+            sprintf(buf, "%s%s%s%s%s%s %dms", dblmsg[pobj->es], pobj->bl ? "bl " : "", pobj->nt ? "nt " : "", pobj->sb ? "sb " : "", pobj->iv ? "iv " : "", pobj->ei ? "ei " : "", pobj->elapsed.milliseconds);
+            LogPoint(logpointbuf, int(piecarr[i].address), double(piecarr[i].value), buf, &piecarr[i].timetag);
+          }
+        }
+        LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
+        dataIndication(piecarr, papdu->asduh.num);
+        delete[] piecarr;
+      }
+      break;
+      case M_EP_TE_1: { // 39 = Packed start events of protection equipment with CP56Time2a time tag
+        char logpointbuf[15000] = "";
+        unsigned int addr24 = 0;
+        iec_type39* pobj;
+        iec_obj* piecarr = new iec_obj [papdu->asduh.num];
+        if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
+          GIObjectCnt += papdu->asduh.num;
+
+        for (int i = 0; i < papdu->asduh.num; i++) {
+          if (papdu->asduh.sq) {
+            pobj =  &papdu->sq39.obj[i];
+            if (i == 0)
+              addr24 = papdu->sq39.ioa16 + (unsigned(papdu->sq39.ioa8) << 16);
+            else
+              addr24++;
+          } else {
+            pobj =  &papdu->nsq39[i].obj;
+            addr24 = papdu->nsq39[i].ioa16 + (unsigned(papdu->nsq39[i].ioa8) << 16);
+          }
+
+          piecarr[i].address = addr24;
+          piecarr[i].ca = papdu->asduh.ca;
+          piecarr[i].cause = papdu->asduh.cause;
+          piecarr[i].pn = papdu->asduh.pn;
+          piecarr[i].test = papdu->asduh.t;
+          piecarr[i].type = papdu->asduh.type;
+          piecarr[i].value = pobj->spe.gs;
+          piecarr[i].spe = pobj->spe;
+          piecarr[i].bl = pobj->bl;
+          piecarr[i].nt = pobj->nt;
+          piecarr[i].sb = pobj->sb;
+          piecarr[i].iv = pobj->iv;
+          piecarr[i].elapsed_time = pobj->elapsed;
+          piecarr[i].timetag.mday = pobj->time.mday;
+          piecarr[i].timetag.month = pobj->time.month;
+          piecarr[i].timetag.year = pobj->time.year;
+          piecarr[i].timetag.hour = pobj->time.hour;
+          piecarr[i].timetag.min = pobj->time.min;
+          piecarr[i].timetag.msec = pobj->time.msec;
+          piecarr[i].timetag.iv = pobj->time.iv;
+          piecarr[i].timetag.su = pobj->time.su;
+          if (mLog.isLogging()) {
+            char buf[200];
+            sprintf(buf, "%s%s%s%s%s%s%s%s%s%s%s %dms", pobj->bl ? "bl " : "", pobj->nt ? "nt " : "", pobj->sb ? "sb " : "", pobj->iv ? "iv " : "", pobj->ei ? "ei " : "",
+                    pobj->spe.gs ? "gs " : "",
+                    pobj->spe.sl1 ? "sl1 " : "",
+                    pobj->spe.sl2 ? "sl2 " : "",
+                    pobj->spe.sl3 ? "sl3 " : "",
+                    pobj->spe.sie ? "sie " : "",
+                    pobj->spe.srd ? "srd " : "",
+                    pobj->elapsed.milliseconds);
+            LogPoint(logpointbuf, int(piecarr[i].address), double(piecarr[i].value), buf, &piecarr[i].timetag);
+          }
+        }
+        LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
+        dataIndication(piecarr, papdu->asduh.num);
+        delete[] piecarr;
+      }
+      break;
+      case M_EP_TF_1: { // 40 = Packed output circuit information of protection equipment with CP56Time2a time tag
+        char logpointbuf[15000] = "";
+        unsigned int addr24 = 0;
+        iec_type40* pobj;
+        iec_obj* piecarr = new iec_obj [papdu->asduh.num];
+        if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
+          GIObjectCnt += papdu->asduh.num;
+
+        for (int i = 0; i < papdu->asduh.num; i++) {
+          if (papdu->asduh.sq) {
+            pobj = &papdu->sq40.obj[i];
+            if (i == 0)
+              addr24 = papdu->sq40.ioa16 + (unsigned(papdu->sq40.ioa8) << 16);
+            else
+              addr24++;
+          } else {
+            pobj =  &papdu->nsq40[i].obj;
+            addr24 = papdu->nsq40[i].ioa16 + (unsigned(papdu->nsq40[i].ioa8) << 16);
+          }
+
+          piecarr[i].address = addr24;
+          piecarr[i].ca = papdu->asduh.ca;
+          piecarr[i].cause = papdu->asduh.cause;
+          piecarr[i].pn = papdu->asduh.pn;
+          piecarr[i].test = papdu->asduh.t;
+          piecarr[i].type = papdu->asduh.type;
+          piecarr[i].value = pobj->oci.gc;
+          piecarr[i].oci = pobj->oci;
+          piecarr[i].bl = pobj->bl;
+          piecarr[i].nt = pobj->nt;
+          piecarr[i].sb = pobj->sb;
+          piecarr[i].iv = pobj->iv;
+          piecarr[i].elapsed_time = pobj->elapsed;
+          piecarr[i].timetag.mday = pobj->time.mday;
+          piecarr[i].timetag.month = pobj->time.month;
+          piecarr[i].timetag.year = pobj->time.year;
+          piecarr[i].timetag.hour = pobj->time.hour;
+          piecarr[i].timetag.min = pobj->time.min;
+          piecarr[i].timetag.msec = pobj->time.msec;
+          piecarr[i].timetag.iv = pobj->time.iv;
+          piecarr[i].timetag.su = pobj->time.su;
+          if (mLog.isLogging()) {
+            char buf[200];
+            sprintf(buf, "%s%s%s%s%s%s%s%s%s %dms", pobj->bl ? "bl " : "", pobj->nt ? "nt " : "", pobj->sb ? "sb " : "", pobj->iv ? "iv " : "", pobj->ei ? "ei " : "",
+                    pobj->oci.gc ? "gc " : "",
+                    pobj->oci.cl1 ? "cl1 " : "",
+                    pobj->oci.cl2 ? "cl2 " : "",
+                    pobj->oci.cl3 ? "cl3 " : "",
+                    pobj->elapsed.milliseconds);
+            LogPoint(logpointbuf, int(piecarr[i].address), double(piecarr[i].value), buf, &piecarr[i].timetag);
           }
         }
         LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
@@ -1283,6 +1801,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
         iobj.pn = papdu->asduh.pn;
+        iobj.test = papdu->asduh.t;
         iobj.type = papdu->asduh.type;
         iobj.scs = pobj->scs;
         iobj.qu = pobj->qu;
@@ -1322,6 +1841,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
         iobj.pn = papdu->asduh.pn;
+        iobj.test = papdu->asduh.t;
         iobj.type = papdu->asduh.type;
         iobj.dcs = pobj->dcs;
         iobj.qu = pobj->qu;
@@ -1361,6 +1881,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
         iobj.pn = papdu->asduh.pn;
+        iobj.test = papdu->asduh.t;
         iobj.type = papdu->asduh.type;
         iobj.rcs = pobj->rcs;
         iobj.qu = pobj->qu;
@@ -1368,7 +1889,6 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         commandActRespIndication(&iobj);
       }
       break;
-
       case C_SC_TA_1: { // SINGLE COMMAND WITH TIME
         iec_type58* pobj;
         pobj =  &papdu->nsq58.obj;
@@ -1401,6 +1921,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
         iobj.pn = papdu->asduh.pn;
+        iobj.test = papdu->asduh.t;
         iobj.type = papdu->asduh.type;
         iobj.scs = pobj->scs;
         iobj.qu = pobj->qu;
@@ -1440,6 +1961,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
         iobj.pn = papdu->asduh.pn;
+        iobj.test = papdu->asduh.t;
         iobj.type = papdu->asduh.type;
         iobj.dcs = pobj->dcs;
         iobj.qu = pobj->qu;
@@ -1479,6 +2001,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
         iobj.pn = papdu->asduh.pn;
+        iobj.test = papdu->asduh.t;
         iobj.type = papdu->asduh.type;
         iobj.rcs = pobj->rcs;
         iobj.qu = pobj->qu;
@@ -1486,7 +2009,6 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         commandActRespIndication(&iobj);
       }
       break;
-
       case C_SE_NA_1: { // NORMALISED COMMAND
         iec_type48* pobj;
         pobj =  &papdu->nsq48.obj;
@@ -1519,6 +2041,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
         iobj.pn = papdu->asduh.pn;
+        iobj.test = papdu->asduh.t;
         iobj.type = papdu->asduh.type;
         iobj.qu = 0;
         iobj.se = pobj->se;
@@ -1526,7 +2049,6 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         commandActRespIndication(&iobj);
       }
       break;
-
       case C_SE_TA_1: { // NORMALISED COMMAND WITH TIME
         iec_type61* pobj;
         pobj =  &papdu->nsq61.obj;
@@ -1559,6 +2081,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
         iobj.pn = papdu->asduh.pn;
+        iobj.test = papdu->asduh.t;
         iobj.type = papdu->asduh.type;
         iobj.qu = 0;
         iobj.se = pobj->se;
@@ -1566,7 +2089,6 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         commandActRespIndication(&iobj);
       }
       break;
-
       case C_SE_NB_1: { // SCALED COMMAND
         iec_type49* pobj;
         pobj =  &papdu->nsq49.obj;
@@ -1599,6 +2121,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
         iobj.pn = papdu->asduh.pn;
+        iobj.test = papdu->asduh.t;
         iobj.type = papdu->asduh.type;
         iobj.qu = 0;
         iobj.se = pobj->se;
@@ -1606,7 +2129,6 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         commandActRespIndication(&iobj);
       }
       break;
-
       case C_SE_TB_1: { // SCALED COMMAND WITH TIME
         iec_type62* pobj;
         pobj =  &papdu->nsq62.obj;
@@ -1639,6 +2161,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
         iobj.pn = papdu->asduh.pn;
+        iobj.test = papdu->asduh.t;
         iobj.type = papdu->asduh.type;
         iobj.qu = 0;
         iobj.se = pobj->se;
@@ -1646,7 +2169,6 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         commandActRespIndication(&iobj);
       }
       break;
-
       case C_SE_NC_1: { // FLOAT COMMAND
         iec_type50* pobj;
         pobj =  &papdu->nsq50.obj;
@@ -1679,6 +2201,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
         iobj.pn = papdu->asduh.pn;
+        iobj.test = papdu->asduh.t;
         iobj.type = papdu->asduh.type;
         iobj.qu = 0;
         iobj.se = pobj->se;
@@ -1686,10 +2209,9 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         commandActRespIndication(&iobj);
       }
       break;
-
       case C_SE_TC_1: { // FLOAT COMMAND WITH TIME
         iec_type63* pobj;
-        pobj =  &papdu->nsq63.obj;
+        pobj = &papdu->nsq63.obj;
 
         if (mLog.isLogging()) {
           oss.str("");
@@ -1719,6 +2241,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
         iobj.pn = papdu->asduh.pn;
+        iobj.test = papdu->asduh.t;
         iobj.type = papdu->asduh.type;
         iobj.qu = 0;
         iobj.se = pobj->se;
@@ -1726,7 +2249,6 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         commandActRespIndication(&iobj);
       }
       break;
-
       case M_EI_NA_1: //70
         mLog.pushMsg("R--> END OF INITIALIZATION");
         break;
@@ -1739,7 +2261,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         } else if (papdu->asduh.cause == ACTTERM) {
           mLog.pushMsg("     INTERROGATION ACT TERM ------------------------------------------------------------------------");
           oss.str("");
-          oss << "     Total objects in GI: "
+          oss << "     Total objects in Interrogation: "
               << GIObjectCnt;
           mLog.pushMsg(oss.str().c_str());
 
@@ -1747,27 +2269,85 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         } else
           mLog.pushMsg("     INTERROGATION");
         break;
-      case C_TS_TA_1: // 107
-        oss.str("");
-        oss << "     TEST COMMAND COM TAG";
-        mLog.pushMsg(oss.str().c_str());
+      case C_TS_TA_1: { // 107
+        iec_type107* pobj;
+        pobj = (iec_type107*)papdu->dados;
+
+        if (mLog.isLogging()) {
+          oss.str("");
+          oss << "     TEST COMMAND COM TAG "
+              << " TSC " << unsigned(pobj->tsc)
+              << unsigned(pobj->time.year) << "year " << unsigned(pobj->time.month) << "month " << unsigned(pobj->time.mday) << "day "
+              << unsigned(pobj->time.hour) << "hour " << unsigned(pobj->time.min) << "min " << unsigned(pobj->time.msec / 1000) << "sec "
+              << unsigned(pobj->time.msec % 1000) << "msec";
+          mLog.pushMsg(oss.str().c_str());
+        }
 
         if (papdu->asduh.cause == ACTIVATION) {
-          // iec_type107 * ptype107;
-          // ptype107=(iec_type107 *)papdu->dados;
           confTestCommand();
         }
-        break;
-      case C_CS_NA_1: // 103
-        oss.str("");
-        oss << "     CLOCK SYNC COMMAND";
-        mLog.pushMsg(oss.str().c_str());
-        // iec_type103 * ptype103;
-        // ptype103=(iec_type103 *)papdu->dados;
-        break;
+      }
+      break;
+      case C_RD_NA_1: { // READ COMMAND
+        if (mLog.isLogging()) {
+          oss.str("");
+          oss << "     ";
+          if (papdu->asduh.cause == ACTCONFIRM)
+            oss << "ACTIVATION CONFIRMATION ";
+          else if (papdu->asduh.cause == ACTTERM)
+            oss << "ACTIVATION TERMINATION ";
+          if (papdu->asduh.pn == POSITIVE)
+            oss << "POSITIVE ";
+          else
+            oss << "NEGATIVE ";
+          oss << "READ COMMAND ADDRESS "
+              << unsigned(papdu->asdu102.ioa16) + (unsigned(papdu->asdu102.ioa8) << 16);
+
+          mLog.pushMsg(oss.str().c_str());
+        }
+
+        // send indication to user
+        iec_obj iobj;
+        iobj.address = papdu->asdu102.ioa16 + (unsigned(papdu->asdu102.ioa8) << 16);
+        iobj.ca = papdu->asduh.ca;
+        iobj.cause = papdu->asduh.cause;
+        iobj.pn = papdu->asduh.pn;
+        iobj.test = papdu->asduh.t;
+        iobj.type = papdu->asduh.type;
+        commandActRespIndication(&iobj);
+      }
+      break;
+      case C_CI_NA_1: { // 101
+        iec_type101* pobj;
+        pobj = (iec_type101*)&papdu->asdu101;
+        if (mLog.isLogging()) {
+          oss.str("");
+          oss << "     COUNTER INTERROGATION COMMAND, ADDRESS "
+              << (unsigned(papdu->asdu101.ioa16) + (unsigned(papdu->asdu101.ioa8) << 16))
+              << " FRZ "
+              << pobj->frz
+              << " RQT "
+              << int(pobj->rqt);
+          mLog.pushMsg(oss.str().c_str());
+        }
+      }
+      break;
+      case C_CS_NA_1: { // 103
+        iec_type103* pobj;
+        pobj = (iec_type103*)&papdu->asdu103;
+        if (mLog.isLogging()) {
+          oss.str("");
+          oss << "     CLOCK SYNC COMMAND "
+              << unsigned(pobj->time.year) << "year " << unsigned(pobj->time.month) << "month " << unsigned(pobj->time.mday) << "day "
+              << unsigned(pobj->time.hour) << "hour " << unsigned(pobj->time.min) << "min " << unsigned(pobj->time.msec / 1000) << "sec "
+              << unsigned(pobj->time.msec % 1000) << "msec";
+          mLog.pushMsg(oss.str().c_str());
+        }
+      }
+      break;
       case P_ME_NA_1: { // Parameter of measured value, normalized value
         iec_type110* pobj;
-        pobj =  &papdu->nsq110.obj;
+        pobj = &papdu->nsq110.obj;
 
         if (mLog.isLogging()) {
           oss.str("");
@@ -1799,6 +2379,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
         iobj.pn = papdu->asduh.pn;
+        iobj.test = papdu->asduh.t;
         iobj.type = papdu->asduh.type;
         iobj.se = 0;
         iobj.qu = pobj->kpa;
@@ -1843,6 +2424,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
         iobj.pn = papdu->asduh.pn;
+        iobj.test = papdu->asduh.t;
         iobj.type = papdu->asduh.type;
         iobj.se = 0;
         iobj.qu = pobj->kpa;
@@ -1887,6 +2469,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
         iobj.pn = papdu->asduh.pn;
+        iobj.test = papdu->asduh.t;
         iobj.type = papdu->asduh.type;
         iobj.se = 0;
         iobj.qu = pobj->kpa;
@@ -1925,6 +2508,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
         iobj.pn = papdu->asduh.pn;
+        iobj.test = papdu->asduh.t;
         iobj.type = papdu->asduh.type;
         iobj.se = 0;
         iobj.qu = pobj->qpa;
@@ -2019,7 +2603,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
             << " CA "
             << obj->ca
             << " QU "
-            << int(obj->qu)
+            << unsigned(obj->qu)
             << " SE "
             << unsigned(obj->se);
         mLog.pushMsg(oss.str().c_str());
@@ -2055,7 +2639,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
           << " CA "
           << obj->ca
           << " QU "
-          << int(obj->qu)
+          << unsigned(obj->qu)
           << " SE "
           << unsigned(obj->se);
       mLog.pushMsg(oss.str().c_str());
@@ -2088,7 +2672,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
           << " CA "
           << obj->ca
           << " QU "
-          << int(obj->qu)
+          << unsigned(obj->qu)
           << " SE "
           << unsigned(obj->se);
       mLog.pushMsg(oss.str().c_str());
@@ -2137,7 +2721,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
           << " CA "
           << obj->ca
           << " QU "
-          << int(obj->qu)
+          << unsigned(obj->qu)
           << " SE "
           << unsigned(obj->se);
       mLog.pushMsg(oss.str().c_str());
@@ -2185,7 +2769,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
           << " CA "
           << obj->ca
           << " QU "
-          << int(obj->qu)
+          << unsigned(obj->qu)
           << " SE "
           << unsigned(obj->se);
       mLog.pushMsg(oss.str().c_str());
@@ -2232,7 +2816,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
           << " CA "
           << obj->ca
           << " QU "
-          << int(obj->qu)
+          << unsigned(obj->qu)
           << " SE "
           << unsigned(obj->se);
       mLog.pushMsg(oss.str().c_str());
@@ -2493,7 +3077,10 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       oss.str("");
       oss << "     CLOCK SYNC COMMAND "
           << " CA "
-          << obj->ca;
+          << obj->ca << " "
+          << unsigned(obj->timetag.year) << "year " << unsigned(obj->timetag.month) << "month " << unsigned(obj->timetag.mday) << "day "
+          << unsigned(obj->timetag.hour) << "hour " << unsigned(obj->timetag.min) << "min " << unsigned(obj->timetag.msec / 1000) << "sec "
+          << unsigned(obj->timetag.msec % 1000) << "msec";
       mLog.pushMsg(oss.str().c_str());
       break;
     case C_RP_NA_1: // reset process command
@@ -2515,7 +3102,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       oss.str("");
       oss << "     RESET PROCESS COMMAND"
           << " QRP "
-          << apducmd.asdu105.qrp;
+          << unsigned(apducmd.asdu105.qrp);
       mLog.pushMsg(oss.str().c_str());
       break;
     case C_TS_TA_1: // test command with time tag
@@ -2542,7 +3129,10 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       oss.str("");
       oss << "     TEST COMMAND WITH TIME TAG"
           << " TSC "
-          << apducmd.asdu107.tsc;
+          << apducmd.asdu107.tsc << " "
+          << unsigned(obj->timetag.year) << "year " << unsigned(obj->timetag.month) << "month " << unsigned(obj->timetag.mday) << "day "
+          << unsigned(obj->timetag.hour) << "hour " << unsigned(obj->timetag.min) << "min " << unsigned(obj->timetag.msec / 1000) << "sec "
+          << unsigned(obj->timetag.msec % 1000) << "msec";
       mLog.pushMsg(oss.str().c_str());
       break;
     case P_ME_NA_1:
@@ -2575,7 +3165,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
           << " VAL "
           << short(obj->value)
           << " KPA "
-          << int(obj->kpa)
+          << unsigned(obj->kpa)
           << " POP "
           << unsigned(obj->pop)
           << " LPC "
@@ -2612,7 +3202,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
           << " VAL "
           << short(obj->value)
           << " KPA "
-          << int(obj->kpa)
+          << unsigned(obj->kpa)
           << " POP "
           << unsigned(obj->pop)
           << " LPC "
@@ -2647,9 +3237,9 @@ bool iec104_class::sendCommand(iec_obj* obj) {
           << " CA "
           << obj->ca
           << " VAL "
-          << float(obj->value)
+          << double(obj->value)
           << " KPA "
-          << int(obj->kpa)
+          << unsigned(obj->kpa)
           << " POP "
           << unsigned(obj->pop)
           << " LPC "
@@ -2682,6 +3272,56 @@ bool iec104_class::sendCommand(iec_obj* obj) {
           << short(obj->qpa)
           << " CA "
           << obj->ca;
+      mLog.pushMsg(oss.str().c_str());
+      break;
+    case C_CI_NA_1:
+      apducmd.start = START;
+      apducmd.length = sizeof(apducmd.NS) + sizeof(apducmd.NR) + sizeof(apducmd.asduh) + sizeof(apducmd.asdu101);
+      apducmd.NS = VS;
+      apducmd.NR = VR;
+      apducmd.asduh.type = obj->type;
+      apducmd.asduh.num = 1;
+      apducmd.asduh.sq = 0;
+      apducmd.asduh.cause = obj->cause;
+      apducmd.asduh.t = 0;
+      apducmd.asduh.pn = 0;
+      apducmd.asduh.oa = masterAddress;
+      apducmd.asduh.ca = obj->ca;
+      apducmd.asdu101.ioa16 = obj->address & 0x0000FFFF;
+      apducmd.asdu101.ioa8 = static_cast<unsigned char>(obj->address >> 16);
+      apducmd.asdu101.frz = obj->qu;
+      apducmd.asdu101.rqt = obj->value;
+      sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
+      VS += 2;
+
+      oss.str("");
+      oss << "     COUNTER INTERROGATION COMMAND, ADDRESS "
+          << unsigned(obj->address)
+          << " FRZ " << unsigned(obj->frz)
+          << " RQT " << unsigned(obj->value);
+      mLog.pushMsg(oss.str().c_str());
+      break;
+    case C_RD_NA_1:
+      apducmd.start = START;
+      apducmd.length = sizeof(apducmd.NS) + sizeof(apducmd.NR) + sizeof(apducmd.asduh) + sizeof(apducmd.asdu102);
+      apducmd.NS = VS;
+      apducmd.NR = VR;
+      apducmd.asduh.type = obj->type;
+      apducmd.asduh.num = 1;
+      apducmd.asduh.sq = 0;
+      apducmd.asduh.cause = obj->cause;
+      apducmd.asduh.t = 0;
+      apducmd.asduh.pn = 0;
+      apducmd.asduh.oa = masterAddress;
+      apducmd.asduh.ca = obj->ca;
+      apducmd.asdu102.ioa16 = obj->address & 0x0000FFFF;
+      apducmd.asdu102.ioa8 = static_cast<unsigned char>(obj->address >> 16);
+      sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
+      VS += 2;
+
+      oss.str("");
+      oss << "     READ COMMAND, ADDRESS "
+          << unsigned(obj->address);
       mLog.pushMsg(oss.str().c_str());
       break;
     default:

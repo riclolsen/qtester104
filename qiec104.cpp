@@ -1,6 +1,6 @@
 /*
  * This software implements an IEC 60870-5-104 protocol tester.
- * Copyright © 2010-2017 Ricardo L. Olsen
+ * Copyright © 2010-2022 Ricardo L. Olsen
  *
  * Disclaimer
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
@@ -27,11 +27,10 @@
  * 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
  */
 
-#include <QtWidgets/QApplication>
 #include "qiec104.h"
+#include <QtWidgets/QApplication>
 
-QIec104::QIec104(QObject* parent) :
-  QObject(parent) {
+QIec104::QIec104(QObject *parent) : QObject(parent) {
   mEnding = false;
   mAllowConnect = true;
   SendCommands = 0;
@@ -45,7 +44,9 @@ QIec104::QIec104(QObject* parent) :
   connect(tcps, SIGNAL(readyRead()), this, SLOT(slot_tcpreadytoread()));
   connect(tcps, SIGNAL(connected()), this, SLOT(slot_tcpconnect()));
   connect(tcps, SIGNAL(disconnected()), this, SLOT(slot_tcpdisconnect()));
-  connect(tcps, SIGNAL(error(QAbstractSocket::SocketError)), this, SLOT(slot_tcperror(QAbstractSocket::SocketError)), Qt::DirectConnection);
+  connect(tcps, SIGNAL(error(QAbstractSocket::SocketError)), this,
+          SLOT(slot_tcperror(QAbstractSocket::SocketError)),
+          Qt::DirectConnection);
   connect(tmKeepAlive, SIGNAL(timeout()), this, SLOT(slot_keep_alive()));
 
   tcps->moveToThread(&tcpThread);
@@ -64,7 +65,7 @@ void QIec104::waitBytes(int bytes, int msTout) {
   }
 }
 
-void QIec104::dataIndication(iec_obj* obj, unsigned numpoints) {
+void QIec104::dataIndication(iec_obj *obj, unsigned numpoints) {
   emit signal_dataIndication(obj, numpoints);
 }
 
@@ -76,30 +77,30 @@ void QIec104::connectTCP() {
   if (!mEnding && mAllowConnect) {
     // alternate main and backup UTR IP address, if configured
     if ((++cnt) % 2 || strcmp(getSecondaryIP_backup(), "") == 0) {
-      tcps->connectToHost(getSecondaryIP(), quint16(getPortTCP()), QIODevice::ReadWrite);
+      tcps->connectToHost(getSecondaryIP(), quint16(getPortTCP()),
+                          QIODevice::ReadWrite);
       sprintf(buf, "Try to connect IP: %s", getSecondaryIP());
-      mLog.pushMsg(const_cast<char*>(buf));
+      mLog.pushMsg(const_cast<char *>(buf));
     } else {
-      tcps->connectToHost(getSecondaryIP_backup(), quint16(getPortTCP()), QIODevice::ReadWrite);
+      tcps->connectToHost(getSecondaryIP_backup(), quint16(getPortTCP()),
+                          QIODevice::ReadWrite);
       sprintf(buf, "Try to connect IP: %s", getSecondaryIP_backup());
-      mLog.pushMsg(const_cast<char*>(buf));
+      mLog.pushMsg(const_cast<char *>(buf));
     }
   }
 }
 
-void QIec104::disconnectTCP() {
-  tcps->close();
-}
+void QIec104::disconnectTCP() { tcps->close(); }
 
 void QIec104::slot_tcperror(QAbstractSocket::SocketError socketError) {
   if (socketError != QAbstractSocket::SocketTimeoutError) {
     char buf[100];
     sprintf(buf, "SocketError: %d", socketError);
-    mLog.pushMsg(const_cast<char*>(buf));
+    mLog.pushMsg(const_cast<char *>(buf));
   }
 }
 
-int QIec104::readTCP(char* buf, int szmax) {
+int QIec104::readTCP(char *buf, int szmax) {
   int ret = int(tcps->read(buf, szmax));
 
   if (!mEnding && ret > 0)
@@ -109,7 +110,7 @@ int QIec104::readTCP(char* buf, int szmax) {
 }
 
 // send tcp data, user provided
-void QIec104::sendTCP(char* data, int sz) {
+void QIec104::sendTCP(char *data, int sz) {
   if (tcps->state() == QAbstractSocket::ConnectedState)
     if (!mEnding) {
       tcps->write(data, sz);
@@ -145,15 +146,15 @@ void QIec104::slot_keep_alive() {
   }
 }
 
-void  QIec104::interrogationActConfIndication() {
+void QIec104::interrogationActConfIndication() {
   emit signal_interrogationActConfIndication();
 }
 
-void  QIec104::interrogationActTermIndication() {
+void QIec104::interrogationActTermIndication() {
   emit signal_interrogationActTermIndication();
 }
 
-void QIec104::commandActRespIndication(iec_obj* obj) {
+void QIec104::commandActRespIndication(iec_obj *obj) {
   emit signal_commandActRespIndication(obj);
 }
 
@@ -181,10 +182,6 @@ void QIec104::disable_connect() {
     disconnectTCP();
 }
 
-void QIec104::enable_connect() {
-  mAllowConnect = true;
-}
+void QIec104::enable_connect() { mAllowConnect = true; }
 
-int QIec104::bytesAvailableTCP() {
-  return int(tcps->bytesAvailable());
-}
+int QIec104::bytesAvailableTCP() { return int(tcps->bytesAvailable()); }

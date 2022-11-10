@@ -1,6 +1,6 @@
 /*
  * This software implements an IEC 60870-5-104 protocol tester.
- * Copyright © 2010-2017 Ricardo L. Olsen
+ * Copyright © 2010-2022 Ricardo L. Olsen
  *
  * Disclaimer
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
@@ -41,6 +41,11 @@
 #include <map>
 #include "iec104_class.h"
 #include "qiec104.h"
+
+#define QTESTER_VERSION "v2.5"
+#define QTESTER_COPYRIGHT "Copyright © 2010-2022 Ricardo Lastra Olsen"
+#define CURDIRINIFILENAME "/qtester104.ini"
+#define CONFDIRINIFILENAME "../conf/qtester104.ini"
 
 namespace Ui {
 class MainWindow;
@@ -102,11 +107,11 @@ class MainWindow : public QMainWindow {
   static const int I104M_porta_escuta = 8098; // udp port to receive commands from OSHMI
   static const int I104M_CntToBePrimary = 3; // counts necessary to be primary when not receiving keepalive messages
   static const int I104M_seconds_kamsg = 7; // period of keepalive messages
-  int I104M_CntDnToBePrimary; // countdown to be primary when not receiving keepalive messages
-  int I104M_Logar; // controls log of I104M messages
+  int I104M_CntDnToBePrimary = 0; // countdown to be primary when not receiving keepalive messages
+  int I104M_Logar = 0; // controls log of I104M messages
   bool isPrimary; // primary or secondary redundant mode
-  QUdpSocket* udps; // I104M: udp socket
-  QTimer* tmI104M_kamsg; // timer to send keep alive messages to the dual host
+  QUdpSocket* udps = nullptr; // I104M: udp socket
+  QTimer* tmI104M_kamsg = nullptr; // timer to send keep alive messages to the dual host
   void SendOSHMI(char* msg, unsigned int packet_size);
   void fmtCP56Time(char*, cp56time2a*);
 };
