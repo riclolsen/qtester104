@@ -1,6 +1,6 @@
 /*
  * This software implements an IEC 60870-5-104 protocol tester.
- * Copyright © 2010-2022 Ricardo L. Olsen
+ * Copyright © 2010-2024 Ricardo L. Olsen
  *
  * Disclaimer
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
@@ -96,7 +96,7 @@ void TLogMsg::pushMsg( const char * msg, unsigned int level )
 
 int TLogMsg::count()
 {
-    return mLstLog.size();
+    return int(mLstLog.size());
 }
 
 // Tira mensagem da fila

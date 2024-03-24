@@ -1,4 +1,4 @@
-QTester104 Copyright © 2010-2022 Ricardo L. Olsen.
+QTester104 Copyright Â© 2010-2024 Ricardo L. Olsen.
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -18,7 +18,7 @@ IEC 60870-5-104 is a commonly used protocol for data acquisition and control of 
 
 Directories:
 src - multiplatform qt sources, compile with QT 6.4.0 or later on any supported platform.
-bin - win32 X64 binaries built with QT 6.4.0.
+bin - win32 x64 binaries built with QT 6.6.2.
 conf - configuration file
 
 Can be used to poll substation data and issuing commands.

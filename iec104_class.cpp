@@ -1,6 +1,6 @@
 /*
  * This software implements an IEC 60870-5-104 protocol tester.
- * Copyright © 2010-2022 Ricardo L. Olsen
+ * Copyright © 2010-2024 Ricardo L. Olsen
  *
  * Disclaimer
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
@@ -2992,7 +2992,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.asduh.ca = obj->ca;
       apducmd.nsq50.ioa16 = obj->address & 0x0000FFFF;
       apducmd.nsq50.ioa8 = static_cast<unsigned char>(obj->address >> 16);
-      apducmd.nsq50.obj.r32 = obj->value;
+      apducmd.nsq50.obj.r32 = float(obj->value);
       apducmd.nsq50.obj.ql = 0;
       apducmd.nsq50.obj.se = obj->se;
       sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
@@ -3024,7 +3024,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.asduh.ca = obj->ca;
       apducmd.nsq63.ioa16 = obj->address & 0x0000FFFF;
       apducmd.nsq63.ioa8 = static_cast<unsigned char>(obj->address >> 16);
-      apducmd.nsq63.obj.r32 = obj->value;
+      apducmd.nsq63.obj.r32 = float(obj->value);
       apducmd.nsq63.obj.ql = 0;
       apducmd.nsq63.obj.se = obj->se;
       apducmd.nsq63.obj.time.year = static_cast<unsigned char>(agora->tm_year % 100);
@@ -3290,7 +3290,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.asdu101.ioa16 = obj->address & 0x0000FFFF;
       apducmd.asdu101.ioa8 = static_cast<unsigned char>(obj->address >> 16);
       apducmd.asdu101.frz = obj->qu;
-      apducmd.asdu101.rqt = obj->value;
+      apducmd.asdu101.rqt = uint8_t(obj->value);
       sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
       VS += 2;
 

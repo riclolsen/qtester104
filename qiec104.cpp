@@ -1,6 +1,6 @@
 /*
  * This software implements an IEC 60870-5-104 protocol tester.
- * Copyright © 2010-2022 Ricardo L. Olsen
+ * Copyright © 2010-2024 Ricardo L. Olsen
  *
  * Disclaimer
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
@@ -38,19 +38,19 @@ QIec104::QIec104(QObject *parent) : QObject(parent) {
   mLog.activateLog();
   mLog.doLogTime();
 
-  tcps = new QTcpSocket();
+  tcps = new QTcpSocket(nullptr);
   tmKeepAlive = new QTimer();
 
+  connect(tmKeepAlive, SIGNAL(timeout()), this, SLOT(slot_keep_alive()));
   connect(tcps, SIGNAL(readyRead()), this, SLOT(slot_tcpreadytoread()));
   connect(tcps, SIGNAL(connected()), this, SLOT(slot_tcpconnect()));
   connect(tcps, SIGNAL(disconnected()), this, SLOT(slot_tcpdisconnect()));
-  connect(tcps, SIGNAL(error(QAbstractSocket::SocketError)), this,
+  connect(tcps, SIGNAL(errorOccurred(QAbstractSocket::SocketError)), this,
           SLOT(slot_tcperror(QAbstractSocket::SocketError)),
           Qt::DirectConnection);
-  connect(tmKeepAlive, SIGNAL(timeout()), this, SLOT(slot_keep_alive()));
 
-  tcps->moveToThread(&tcpThread);
-  tcpThread.start(QThread::TimeCriticalPriority);
+  //tcps->moveToThread(&tcpThread);
+  //tcpThread.start(QThread::TimeCriticalPriority);
 }
 
 QIec104::~QIec104() {
@@ -161,12 +161,12 @@ void QIec104::commandActRespIndication(iec_obj *obj) {
 void QIec104::terminate() {
   mEnding = true;
   tcps->close();
-  tcpThread.quit();
-  tcpThread.wait(1000);
-  if (tcpThread.isRunning())
-    tcpThread.terminate();
-  if (tcpThread.isRunning())
-    tcpThread.wait(2000);
+  //tcpThread.quit();
+  //tcpThread.wait(1000);
+  //if (tcpThread.isRunning())
+  //  tcpThread.terminate();
+  //if (tcpThread.isRunning())
+  //  tcpThread.wait(2000);
 }
 
 void QIec104::slot_tcpreadytoread() {

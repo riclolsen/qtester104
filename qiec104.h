@@ -1,6 +1,6 @@
 /*
  * This software implements an IEC 60870-5-104 protocol tester.
- * Copyright © 2010-2022 Ricardo L. Olsen
+ * Copyright © 2010-2024 Ricardo L. Olsen
  *
  * Disclaimer
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
@@ -67,10 +67,10 @@ private slots:
   void slot_tcpreadytoread(); // ready to read data on iec104 tcp socket
   void
   slot_tcperror(QAbstractSocket::SocketError socketError); // show errors of tcp
-  void slot_keep_alive();                                  // timer de 1s
+  void slot_keep_alive();
 
 private:
-  QThread tcpThread;
+  // QThread tcpThread;
 
   // redefine for iec104_class
   void waitBytes(int bytes, int msTout);

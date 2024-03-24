@@ -1,6 +1,6 @@
 /*
  * This software implements an IEC 60870-5-104 protocol tester.
- * Copyright © 2010-2022 Ricardo L. Olsen
+ * Copyright © 2010-2024 Ricardo L. Olsen
  *
  * Disclaimer
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
@@ -35,9 +35,7 @@
 #include <QDir>
 #include <QItemSelectionModel>
 #include <QRegularExpression>
-#include <sstream>
 #include <string>
-#include <time.h>
 
 using namespace std;
 
@@ -348,10 +346,9 @@ void MainWindow::slot_I104M_ready_to_read() {
       break;
     case iec104_class::C_RC_TA_1: // regulating step command with time tag
     case iec104_class::C_RC_NA_1: // regulating step command
-      sprintf(buf, "R--> I104M: regulating step command %f",
-              double(pmsg->setpoint));
+      sprintf(buf, "R--> I104M: regulating step command %s", pmsg->setpoint==0?"LOWER":"RAISE");
       I104M_Loga(buf);
-      obj.rcs = static_cast<unsigned char>(pmsg->setpoint);
+      obj.rcs = pmsg->setpoint==0?1:2;
       i104.sendCommand(&obj);
       LastCommandAddress = obj.address;
       break;
@@ -638,7 +635,7 @@ void MainWindow::slot_dataIndication(iec_obj *obj, unsigned numpoints) {
 
       case iec104_class::M_SP_TB_1: // 30
         fmtCP56Time(buftt, &obj->timetag);
-        [[clang::fallthrough]];
+        [[fallthrough]];
       case iec104_class::M_SP_NA_1: // 1
         sprintf(buf, "%s%s%s%s%s", obj->sp ? "on " : "off ",
                 obj->iv ? "iv " : "", obj->bl ? "bl " : "",
@@ -646,7 +643,7 @@ void MainWindow::slot_dataIndication(iec_obj *obj, unsigned numpoints) {
         break;
       case iec104_class::M_DP_TB_1: // 31
         fmtCP56Time(buftt, &obj->timetag);
-        [[clang::fallthrough]];
+        [[fallthrough]];
       case iec104_class::M_DP_NA_1: // 3
         sprintf(buf, "%s%s%s%s%s", dblmsg[obj->dp], obj->iv ? "iv " : "",
                 obj->bl ? "bl " : "", obj->sb ? "sb " : "",
@@ -654,7 +651,7 @@ void MainWindow::slot_dataIndication(iec_obj *obj, unsigned numpoints) {
         break;
       case iec104_class::M_ST_TB_1: // 32
         fmtCP56Time(buftt, &obj->timetag);
-        [[clang::fallthrough]];
+        [[fallthrough]];
       case iec104_class::M_ST_NA_1: // 5
         sprintf(buf, "%s%s%s%s%s%s", obj->ov ? "ov " : "", obj->iv ? "iv " : "",
                 obj->bl ? "bl " : "", obj->sb ? "sb " : "",
@@ -663,7 +660,7 @@ void MainWindow::slot_dataIndication(iec_obj *obj, unsigned numpoints) {
 
       case iec104_class::M_IT_TB_1: // 37
         fmtCP56Time(buftt, &obj->timetag);
-        [[clang::fallthrough]];
+        [[fallthrough]];
       case iec104_class::M_IT_NA_1: // 15
         sprintf(buf, "%s%s%s%s%u", obj->iv ? "iv " : "", obj->cadj ? "ca " : "",
                 obj->cy ? "cy " : "", "sq=", obj->sq);
@@ -688,7 +685,7 @@ void MainWindow::slot_dataIndication(iec_obj *obj, unsigned numpoints) {
 
       case iec104_class::M_BO_TB_1: // 33
         fmtCP56Time(buftt, &obj->timetag);
-        [[clang::fallthrough]];
+        [[fallthrough]];
       case iec104_class::M_BO_NA_1: // 7
         sprintf(buf,
                 "%s%s%s%s%s ST %d%d%d%d %d%d%d%d %d%d%d%d %d%d%d%d %d%d%d%d "
@@ -709,7 +706,7 @@ void MainWindow::slot_dataIndication(iec_obj *obj, unsigned numpoints) {
       case iec104_class::M_ME_TE_1: // 35
       case iec104_class::M_ME_TF_1: // 36
         fmtCP56Time(buftt, &obj->timetag);
-        [[clang::fallthrough]];
+        [[fallthrough]];
       case iec104_class::M_ME_NA_1: // 9
       case iec104_class::M_ME_NB_1: // 11
       case iec104_class::M_ME_NC_1: // 13
@@ -946,7 +943,7 @@ void MainWindow::slot_commandActRespIndication(iec_obj *obj) {
     switch (obj->type) {
     case iec104_class::C_SC_TA_1:
       fmtCP56Time(buftt, &obj->timetag);
-      [[clang::fallthrough]];
+      [[fallthrough]];
     case iec104_class::C_SC_NA_1:
       sprintf(buf, "%d", int(obj->scs));
       mapPtItem_ColValue[std::make_pair(obj->ca, obj->address)]->setText(buf);
@@ -955,7 +952,7 @@ void MainWindow::slot_commandActRespIndication(iec_obj *obj) {
       break;
     case iec104_class::C_DC_TA_1:
       fmtCP56Time(buftt, &obj->timetag);
-      [[clang::fallthrough]];
+      [[fallthrough]];
     case iec104_class::C_DC_NA_1:
       sprintf(buf, "%d", int(obj->dcs));
       mapPtItem_ColValue[std::make_pair(obj->ca, obj->address)]->setText(buf);
@@ -964,7 +961,7 @@ void MainWindow::slot_commandActRespIndication(iec_obj *obj) {
       break;
     case iec104_class::C_RC_TA_1:
       fmtCP56Time(buftt, &obj->timetag);
-      [[clang::fallthrough]];
+      [[fallthrough]];
     case iec104_class::C_RC_NA_1:
       sprintf(buf, "%d", int(obj->rcs));
       mapPtItem_ColValue[std::make_pair(obj->ca, obj->address)]->setText(buf);
@@ -972,32 +969,32 @@ void MainWindow::slot_commandActRespIndication(iec_obj *obj) {
       break;
     case iec104_class::C_SE_TA_1:
       fmtCP56Time(buftt, &obj->timetag);
-      [[clang::fallthrough]];
+      [[fallthrough]];
     case iec104_class::C_SE_NA_1:
       sprintf(buf, "%s%s", pnmsg[obj->pn], selmsg[obj->se]);
       break;
     case iec104_class::C_SE_TB_1:
       fmtCP56Time(buftt, &obj->timetag);
-      [[clang::fallthrough]];
+      [[fallthrough]];
     case iec104_class::C_SE_NB_1:
       sprintf(buf, "%s%s", pnmsg[obj->pn], selmsg[obj->se]);
       break;
     case iec104_class::C_SE_TC_1:
       fmtCP56Time(buftt, &obj->timetag);
-      [[clang::fallthrough]];
+      [[fallthrough]];
     case iec104_class::C_SE_NC_1:
       sprintf(buf, "%s%s", pnmsg[obj->pn], selmsg[obj->se]);
       break;
     case iec104_class::C_BO_TA_1:
       fmtCP56Time(buftt, &obj->timetag);
-      [[clang::fallthrough]];
+      [[fallthrough]];
     case iec104_class::C_BO_NA_1:
       sprintf(buf, "%s", pnmsg[obj->pn]);
       break;
     case iec104_class::P_ME_NA_1:
-      [[clang::fallthrough]];
+      [[fallthrough]];
     case iec104_class::P_ME_NB_1:
-      [[clang::fallthrough]];
+      [[fallthrough]];
     case iec104_class::P_ME_NC_1:
       sprintf(buf, "%s%s%s%s", pnmsg[obj->pn], kpamsg[obj->kpa],
               obj->lpc ? "lpc " : "", obj->pop ? "pop " : "");
