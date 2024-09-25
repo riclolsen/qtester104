@@ -391,11 +391,18 @@ void iec104_class::confTestCommand() {
   wapdu.asdu107.ioa8 = 0;
   wapdu.asdu107.tsc = 0;
   wapdu.asdu107.time.year = agora->tm_year % 100;
-  wapdu.asdu107.time.month = static_cast<unsigned char>(agora->tm_mon);
-  wapdu.asdu107.time.mday = static_cast<unsigned char>(agora->tm_mday);
-  wapdu.asdu107.time.hour = static_cast<unsigned char>(agora->tm_hour);
-  wapdu.asdu107.time.min = static_cast<unsigned char>(agora->tm_min);
-  wapdu.asdu107.time.msec = static_cast<unsigned short>(agora->tm_sec * 1000);
+  wapdu.asdu107.time.month = static_cast<uint8_t>(agora->tm_mon);
+  wapdu.asdu107.time.mday = static_cast<uint8_t>(agora->tm_mday);
+  wapdu.asdu107.time.hour = static_cast<uint8_t>(agora->tm_hour);
+  wapdu.asdu107.time.min = static_cast<uint8_t>(agora->tm_min);
+  wapdu.asdu107.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000);
+  wapdu.asdu107.time.su = static_cast<uint8_t>(agora->tm_isdst);
+  wapdu.asdu107.time.iv = 0;
+  wapdu.asdu107.time.wday = static_cast<uint8_t>(agora->tm_wday);
+  wapdu.asdu107.time.res1 = 0;
+  wapdu.asdu107.time.res2 = 0;
+  wapdu.asdu107.time.res3 = 0;
+  wapdu.asdu107.time.res4 = 0;
 
   sendTCP(reinterpret_cast<char*>(&wapdu), 22 + 2);
   VS += 2;
@@ -546,7 +553,16 @@ void iec104_class::LogPoint(char* buf, int address, double val, char* qualifier,
     trim(buf);
 
     if (timetag != nullptr)
-      sprintf(buf + strlen(buf), " %04d/%02d/%02d %02d:%02d:%02d.%03d%s%s", timetag->year + 2000, timetag->month, timetag->mday, timetag->hour, timetag->min,  timetag->msec / 1000, timetag->msec % 1000, timetag->iv ? ".iv" : "", timetag->su ? ".su" : "");
+      sprintf(buf + strlen(buf), " %04d/%02d/%02d %02d:%02d:%02d.%03d%s%s",
+                timetag->year + 2000,
+                timetag->month,
+                timetag->mday,
+                timetag->hour,
+                timetag->min,
+                timetag->msec / 1000,
+                timetag->msec % 1000,
+                timetag->iv ? ".iv" : "",
+                timetag->su ? ".su" : "");
     sprintf(buf + strlen(buf), "] ");
   }
 }
@@ -989,14 +1005,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           piecarr[i].nt = pobj->nt;
           piecarr[i].sb = pobj->sb;
           piecarr[i].iv = pobj->iv;
-          piecarr[i].timetag.mday = pobj->time.mday;
-          piecarr[i].timetag.month = pobj->time.month;
-          piecarr[i].timetag.year = pobj->time.year;
-          piecarr[i].timetag.hour = pobj->time.hour;
-          piecarr[i].timetag.min = pobj->time.min;
-          piecarr[i].timetag.msec = pobj->time.msec;
-          piecarr[i].timetag.iv = pobj->time.iv;
-          piecarr[i].timetag.su = pobj->time.su;
+          piecarr[i].timetag = pobj->time;
           if (mLog.isLogging()) {
             char buf[100];
             sprintf(buf, "%s%s%s%s%s", pobj->sp ? "on " : "off ", pobj->bl ? "bl " : "", pobj->nt ? "nt " : "", pobj->sb ? "sb " : "", pobj->iv ? "iv " : "");
@@ -1040,14 +1049,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           piecarr[i].nt = pobj->nt;
           piecarr[i].sb = pobj->sb;
           piecarr[i].iv = pobj->iv;
-          piecarr[i].timetag.mday = pobj->time.mday;
-          piecarr[i].timetag.month = pobj->time.month;
-          piecarr[i].timetag.year = pobj->time.year;
-          piecarr[i].timetag.hour = pobj->time.hour;
-          piecarr[i].timetag.min = pobj->time.min;
-          piecarr[i].timetag.msec = pobj->time.msec;
-          piecarr[i].timetag.iv = pobj->time.iv;
-          piecarr[i].timetag.su = pobj->time.su;
+          piecarr[i].timetag = pobj->time;
           if (mLog.isLogging()) {
             char buf[100];
             static const char* dblmsg[] = { "tra ", "off ", "on ", "ind " };
@@ -1093,14 +1095,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           piecarr[i].nt = pobj->nt;
           piecarr[i].sb = pobj->sb;
           piecarr[i].iv = pobj->iv;
-          piecarr[i].timetag.mday = pobj->time.mday;
-          piecarr[i].timetag.month = pobj->time.month;
-          piecarr[i].timetag.year = pobj->time.year;
-          piecarr[i].timetag.hour = pobj->time.hour;
-          piecarr[i].timetag.min = pobj->time.min;
-          piecarr[i].timetag.msec = pobj->time.msec;
-          piecarr[i].timetag.iv = pobj->time.iv;
-          piecarr[i].timetag.su = pobj->time.su;
+          piecarr[i].timetag = pobj->time;
           if (mLog.isLogging()) {
             char buf[100];
             sprintf(buf, "%s%s%s%s%s%s", pobj->t ? "t " : "", pobj->ov ? "ov " : "", pobj->bl ? "bl " : "", pobj->nt ? "nt " : "", pobj->sb ? "sb " : "", pobj->iv ? "iv " : "");
@@ -1301,14 +1296,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           piecarr[i].nt = pobj->nt;
           piecarr[i].sb = pobj->sb;
           piecarr[i].iv = pobj->iv;
-          piecarr[i].timetag.mday = pobj->time.mday;
-          piecarr[i].timetag.month = pobj->time.month;
-          piecarr[i].timetag.year = pobj->time.year;
-          piecarr[i].timetag.hour = pobj->time.hour;
-          piecarr[i].timetag.min = pobj->time.min;
-          piecarr[i].timetag.msec = pobj->time.msec;
-          piecarr[i].timetag.iv = pobj->time.iv;
-          piecarr[i].timetag.su = pobj->time.su;
+          piecarr[i].timetag = pobj->time;
           if (mLog.isLogging()) {
             char buf[1000];
             sprintf(buf, "%s%s%s%s%s ST %d%d%d%d %d%d%d%d %d%d%d%d %d%d%d%d %d%d%d%d %d%d%d% d%d%d%d %d%d%d%d [1-32]",
@@ -1581,14 +1569,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           piecarr[i].cy = pobj->cy;
           piecarr[i].sq = pobj->sq;
           piecarr[i].iv = pobj->iv;
-          piecarr[i].timetag.mday = pobj->time.mday;
-          piecarr[i].timetag.month = pobj->time.month;
-          piecarr[i].timetag.year = pobj->time.year;
-          piecarr[i].timetag.hour = pobj->time.hour;
-          piecarr[i].timetag.min = pobj->time.min;
-          piecarr[i].timetag.msec = pobj->time.msec;
-          piecarr[i].timetag.iv = pobj->time.iv;
-          piecarr[i].timetag.su = pobj->time.su;
+          piecarr[i].timetag = pobj->time;
           if (mLog.isLogging()) {
             char buf[100];
             sprintf(buf, "%s%s%s%s%u", pobj->ca ? "ca " : "", pobj->cy ? "cy " : "", pobj->iv ? "iv " : "", "sq=", pobj->sq);
@@ -2166,6 +2147,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         iobj.qu = 0;
         iobj.se = pobj->se;
         iobj.value = pobj->sva;
+        iobj.timetag = pobj->time;
         commandActRespIndication(&iobj);
       }
       break;
@@ -2586,7 +2568,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.asduh.oa = masterAddress;
       apducmd.asduh.ca = obj->ca;
       apducmd.nsq45.ioa16 = obj->address & 0x0000FFFF;
-      apducmd.nsq45.ioa8 = static_cast<unsigned char>(obj->address >> 16);
+      apducmd.nsq45.ioa8 = static_cast<uint8_t>(obj->address >> 16);
       apducmd.nsq45.obj.scs = obj->scs;
       apducmd.nsq45.obj.res = 0;
       apducmd.nsq45.obj.qu = obj->qu;
@@ -2624,7 +2606,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.asduh.oa = masterAddress;
       apducmd.asduh.ca = obj->ca;
       apducmd.nsq46.ioa16 = obj->address & 0x0000FFFF;
-      apducmd.nsq46.ioa8 = static_cast<unsigned char>(obj->address >> 16);
+      apducmd.nsq46.ioa8 = static_cast<uint8_t>(obj->address >> 16);
       apducmd.nsq46.obj.dcs = obj->dcs;
       apducmd.nsq46.obj.qu = obj->qu;
       apducmd.nsq46.obj.se = obj->se;
@@ -2658,7 +2640,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.asduh.oa = masterAddress;
       apducmd.asduh.ca = obj->ca;
       apducmd.nsq47.ioa16 = obj->address & 0x0000FFFF;
-      apducmd.nsq47.ioa8 = static_cast<unsigned char>(obj->address >> 16);
+      apducmd.nsq47.ioa8 = static_cast<uint8_t>(obj->address >> 16);
       apducmd.nsq47.obj.rcs = obj->rcs;
       apducmd.nsq47.obj.qu = obj->qu;
       apducmd.nsq47.obj.se = obj->se;
@@ -2691,21 +2673,21 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.asduh.oa = masterAddress;
       apducmd.asduh.ca = obj->ca;
       apducmd.nsq58.ioa16 = obj->address & 0x0000FFFF;
-      apducmd.nsq58.ioa8 = static_cast<unsigned char>(obj->address >> 16);
+      apducmd.nsq58.ioa8 = static_cast<uint8_t>(obj->address >> 16);
       apducmd.nsq58.obj.scs = obj->scs;
       apducmd.nsq58.obj.res = 0;
       apducmd.nsq58.obj.qu = obj->qu;
       apducmd.nsq58.obj.se = obj->se;
-      apducmd.nsq58.obj.time.year = static_cast<unsigned char>(agora->tm_year % 100);
-      apducmd.nsq58.obj.time.month = static_cast<unsigned char>(agora->tm_mon + 1);
-      apducmd.nsq58.obj.time.mday = static_cast<unsigned char>(agora->tm_mday);
-      apducmd.nsq58.obj.time.hour = static_cast<unsigned char>(agora->tm_hour);
-      apducmd.nsq58.obj.time.min = static_cast<unsigned char>(agora->tm_min);
-      apducmd.nsq58.obj.time.hour = static_cast<unsigned char>(agora->tm_hour);
-      apducmd.nsq58.obj.time.msec = static_cast<unsigned short>(agora->tm_sec * 1000);
+      apducmd.nsq58.obj.time.year = static_cast<uint8_t>(agora->tm_year % 100);
+      apducmd.nsq58.obj.time.month = static_cast<uint8_t>(agora->tm_mon + 1);
+      apducmd.nsq58.obj.time.mday = static_cast<uint8_t>(agora->tm_mday);
+      apducmd.nsq58.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
+      apducmd.nsq58.obj.time.min = static_cast<uint8_t>(agora->tm_min);
+      apducmd.nsq58.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
+      apducmd.nsq58.obj.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000);
       apducmd.nsq58.obj.time.iv = 0;
-      apducmd.nsq58.obj.time.su = 0;
-      apducmd.nsq58.obj.time.wday = static_cast<unsigned char>(agora->tm_wday);
+      apducmd.nsq58.obj.time.su = static_cast<uint8_t>(agora->tm_isdst);
+      apducmd.nsq58.obj.time.wday = static_cast<uint8_t>(agora->tm_wday);
       apducmd.nsq58.obj.time.res1 = 0;
       apducmd.nsq58.obj.time.res2 = 0;
       apducmd.nsq58.obj.time.res3 = 0;
@@ -2740,20 +2722,20 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.asduh.oa = masterAddress;
       apducmd.asduh.ca = obj->ca;
       apducmd.nsq59.ioa16 = obj->address & 0x0000FFFF;
-      apducmd.nsq59.ioa8 = static_cast<unsigned char>(obj->address >> 16);
+      apducmd.nsq59.ioa8 = static_cast<uint8_t>(obj->address >> 16);
       apducmd.nsq59.obj.dcs = obj->dcs;
       apducmd.nsq59.obj.qu = obj->qu;
       apducmd.nsq59.obj.se = obj->se;
-      apducmd.nsq59.obj.time.year = static_cast<unsigned char>(agora->tm_year % 100);
-      apducmd.nsq59.obj.time.month = static_cast<unsigned char>(agora->tm_mon + 1);
-      apducmd.nsq59.obj.time.mday = static_cast<unsigned char>(agora->tm_mday);
-      apducmd.nsq59.obj.time.hour = static_cast<unsigned char>(agora->tm_hour);
-      apducmd.nsq59.obj.time.min = static_cast<unsigned char>(agora->tm_min);
-      apducmd.nsq59.obj.time.hour = static_cast<unsigned char>(agora->tm_hour);
-      apducmd.nsq59.obj.time.msec = static_cast<unsigned short>(agora->tm_sec * 1000);
+      apducmd.nsq59.obj.time.year = static_cast<uint8_t>(agora->tm_year % 100);
+      apducmd.nsq59.obj.time.month = static_cast<uint8_t>(agora->tm_mon + 1);
+      apducmd.nsq59.obj.time.mday = static_cast<uint8_t>(agora->tm_mday);
+      apducmd.nsq59.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
+      apducmd.nsq59.obj.time.min = static_cast<uint8_t>(agora->tm_min);
+      apducmd.nsq59.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
+      apducmd.nsq59.obj.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000);
       apducmd.nsq59.obj.time.iv = 0;
-      apducmd.nsq59.obj.time.su = 0;
-      apducmd.nsq59.obj.time.wday = static_cast<unsigned char>(agora->tm_wday);
+      apducmd.nsq59.obj.time.su = static_cast<uint8_t>(agora->tm_isdst);
+      apducmd.nsq59.obj.time.wday = static_cast<uint8_t>(agora->tm_wday);
       apducmd.nsq59.obj.time.res1 = 0;
       apducmd.nsq59.obj.time.res2 = 0;
       apducmd.nsq59.obj.time.res3 = 0;
@@ -2788,20 +2770,20 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.asduh.oa = masterAddress;
       apducmd.asduh.ca = obj->ca;
       apducmd.nsq60.ioa16 = obj->address & 0x0000FFFF;
-      apducmd.nsq60.ioa8 = static_cast<unsigned char>(obj->address >> 16);
+      apducmd.nsq60.ioa8 = static_cast<uint8_t>(obj->address >> 16);
       apducmd.nsq60.obj.rcs = obj->rcs;
       apducmd.nsq60.obj.qu = obj->qu;
       apducmd.nsq60.obj.se = obj->se;
-      apducmd.nsq60.obj.time.year = static_cast<unsigned char>(agora->tm_year % 100);
-      apducmd.nsq60.obj.time.month = static_cast<unsigned char>(agora->tm_mon + 1);
-      apducmd.nsq60.obj.time.mday = static_cast<unsigned char>(agora->tm_mday);
-      apducmd.nsq60.obj.time.hour = static_cast<unsigned char>(agora->tm_hour);
-      apducmd.nsq60.obj.time.min = static_cast<unsigned char>(agora->tm_min);
-      apducmd.nsq60.obj.time.hour = static_cast<unsigned char>(agora->tm_hour);
-      apducmd.nsq60.obj.time.msec = static_cast<unsigned short>(agora->tm_sec * 1000);
+      apducmd.nsq60.obj.time.year = static_cast<uint8_t>(agora->tm_year % 100);
+      apducmd.nsq60.obj.time.month = static_cast<uint8_t>(agora->tm_mon + 1);
+      apducmd.nsq60.obj.time.mday = static_cast<uint8_t>(agora->tm_mday);
+      apducmd.nsq60.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
+      apducmd.nsq60.obj.time.min = static_cast<uint8_t>(agora->tm_min);
+      apducmd.nsq60.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
+      apducmd.nsq60.obj.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000);
       apducmd.nsq60.obj.time.iv = 0;
-      apducmd.nsq60.obj.time.su = 0;
-      apducmd.nsq60.obj.time.wday = static_cast<unsigned char>(agora->tm_wday);
+      apducmd.nsq60.obj.time.su = static_cast<uint8_t>(agora->tm_isdst);
+      apducmd.nsq60.obj.time.wday = static_cast<uint8_t>(agora->tm_wday);
       apducmd.nsq60.obj.time.res1 = 0;
       apducmd.nsq60.obj.time.res2 = 0;
       apducmd.nsq60.obj.time.res3 = 0;
@@ -2835,7 +2817,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.asduh.oa = masterAddress;
       apducmd.asduh.ca = obj->ca;
       apducmd.nsq48.ioa16 = obj->address & 0x0000FFFF;
-      apducmd.nsq48.ioa8 = static_cast<unsigned char>(obj->address >> 16);
+      apducmd.nsq48.ioa8 = static_cast<uint8_t>(obj->address >> 16);
       apducmd.nsq48.obj.nva = short(obj->value);
       apducmd.nsq48.obj.ql = 0;
       apducmd.nsq48.obj.se = obj->se;
@@ -2867,20 +2849,20 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.asduh.oa = masterAddress;
       apducmd.asduh.ca = obj->ca;
       apducmd.nsq61.ioa16 = obj->address & 0x0000FFFF;
-      apducmd.nsq61.ioa8 = static_cast<unsigned char>(obj->address >> 16);
+      apducmd.nsq61.ioa8 = static_cast<uint8_t>(obj->address >> 16);
       apducmd.nsq61.obj.nva = short(obj->value);
       apducmd.nsq61.obj.ql = 0;
       apducmd.nsq61.obj.se = obj->se;
-      apducmd.nsq61.obj.time.year = static_cast<unsigned char>(agora->tm_year % 100);
-      apducmd.nsq61.obj.time.month = static_cast<unsigned char>(agora->tm_mon + 1);
-      apducmd.nsq61.obj.time.mday = static_cast<unsigned char>(agora->tm_mday);
-      apducmd.nsq61.obj.time.hour = static_cast<unsigned char>(agora->tm_hour);
-      apducmd.nsq61.obj.time.min = static_cast<unsigned char>(agora->tm_min);
-      apducmd.nsq61.obj.time.hour = static_cast<unsigned char>(agora->tm_hour);
-      apducmd.nsq61.obj.time.msec = static_cast<unsigned short>(agora->tm_sec * 1000);
+      apducmd.nsq61.obj.time.year = static_cast<uint8_t>(agora->tm_year % 100);
+      apducmd.nsq61.obj.time.month = static_cast<uint8_t>(agora->tm_mon + 1);
+      apducmd.nsq61.obj.time.mday = static_cast<uint8_t>(agora->tm_mday);
+      apducmd.nsq61.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
+      apducmd.nsq61.obj.time.min = static_cast<uint8_t>(agora->tm_min);
+      apducmd.nsq61.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
+      apducmd.nsq61.obj.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000);
       apducmd.nsq61.obj.time.iv = 0;
-      apducmd.nsq61.obj.time.su = 0;
-      apducmd.nsq61.obj.time.wday = static_cast<unsigned char>(agora->tm_wday);
+      apducmd.nsq61.obj.time.su = static_cast<uint8_t>(agora->tm_isdst);
+      apducmd.nsq61.obj.time.wday = static_cast<uint8_t>(agora->tm_wday);
       apducmd.nsq61.obj.time.res1 = 0;
       apducmd.nsq61.obj.time.res2 = 0;
       apducmd.nsq61.obj.time.res3 = 0;
@@ -2913,7 +2895,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.asduh.oa = masterAddress;
       apducmd.asduh.ca = obj->ca;
       apducmd.nsq49.ioa16 = obj->address & 0x0000FFFF;
-      apducmd.nsq49.ioa8 = static_cast<unsigned char>(obj->address >> 16);
+      apducmd.nsq49.ioa8 = static_cast<uint8_t>(obj->address >> 16);
       apducmd.nsq49.obj.sva = short(obj->value);
       apducmd.nsq49.obj.ql = 0;
       apducmd.nsq49.obj.se = obj->se;
@@ -2945,20 +2927,20 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.asduh.oa = masterAddress;
       apducmd.asduh.ca = obj->ca;
       apducmd.nsq62.ioa16 = obj->address & 0x0000FFFF;
-      apducmd.nsq62.ioa8 = static_cast<unsigned char>(obj->address >> 16);
+      apducmd.nsq62.ioa8 = static_cast<uint8_t>(obj->address >> 16);
       apducmd.nsq62.obj.sva = short(obj->value);
       apducmd.nsq62.obj.ql = 0;
       apducmd.nsq62.obj.se = obj->se;
-      apducmd.nsq62.obj.time.year = static_cast<unsigned char>(agora->tm_year % 100);
-      apducmd.nsq62.obj.time.month = static_cast<unsigned char>(agora->tm_mon + 1);
-      apducmd.nsq62.obj.time.mday = static_cast<unsigned char>(agora->tm_mday);
-      apducmd.nsq62.obj.time.hour = static_cast<unsigned char>(agora->tm_hour);
-      apducmd.nsq62.obj.time.min = static_cast<unsigned char>(agora->tm_min);
-      apducmd.nsq62.obj.time.hour = static_cast<unsigned char>(agora->tm_hour);
-      apducmd.nsq62.obj.time.msec = static_cast<unsigned short>(agora->tm_sec * 1000);
+      apducmd.nsq62.obj.time.year = static_cast<uint8_t>(agora->tm_year % 100);
+      apducmd.nsq62.obj.time.month = static_cast<uint8_t>(agora->tm_mon + 1);
+      apducmd.nsq62.obj.time.mday = static_cast<uint8_t>(agora->tm_mday);
+      apducmd.nsq62.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
+      apducmd.nsq62.obj.time.min = static_cast<uint8_t>(agora->tm_min);
+      apducmd.nsq62.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
+      apducmd.nsq62.obj.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000);
       apducmd.nsq62.obj.time.iv = 0;
-      apducmd.nsq62.obj.time.su = 0;
-      apducmd.nsq62.obj.time.wday = static_cast<unsigned char>(agora->tm_wday);
+      apducmd.nsq62.obj.time.su = static_cast<uint8_t>(agora->tm_isdst);
+      apducmd.nsq62.obj.time.wday = static_cast<uint8_t>(agora->tm_wday);
       apducmd.nsq62.obj.time.res1 = 0;
       apducmd.nsq62.obj.time.res2 = 0;
       apducmd.nsq62.obj.time.res3 = 0;
@@ -2991,7 +2973,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.asduh.oa = masterAddress;
       apducmd.asduh.ca = obj->ca;
       apducmd.nsq50.ioa16 = obj->address & 0x0000FFFF;
-      apducmd.nsq50.ioa8 = static_cast<unsigned char>(obj->address >> 16);
+      apducmd.nsq50.ioa8 = static_cast<uint8_t>(obj->address >> 16);
       apducmd.nsq50.obj.r32 = float(obj->value);
       apducmd.nsq50.obj.ql = 0;
       apducmd.nsq50.obj.se = obj->se;
@@ -3023,20 +3005,20 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.asduh.oa = masterAddress;
       apducmd.asduh.ca = obj->ca;
       apducmd.nsq63.ioa16 = obj->address & 0x0000FFFF;
-      apducmd.nsq63.ioa8 = static_cast<unsigned char>(obj->address >> 16);
+      apducmd.nsq63.ioa8 = static_cast<uint8_t>(obj->address >> 16);
       apducmd.nsq63.obj.r32 = float(obj->value);
       apducmd.nsq63.obj.ql = 0;
       apducmd.nsq63.obj.se = obj->se;
-      apducmd.nsq63.obj.time.year = static_cast<unsigned char>(agora->tm_year % 100);
-      apducmd.nsq63.obj.time.month = static_cast<unsigned char>(agora->tm_mon + 1);
-      apducmd.nsq63.obj.time.mday = static_cast<unsigned char>(agora->tm_mday);
-      apducmd.nsq63.obj.time.hour = static_cast<unsigned char>(agora->tm_hour);
-      apducmd.nsq63.obj.time.min = static_cast<unsigned char>(agora->tm_min);
-      apducmd.nsq63.obj.time.hour = static_cast<unsigned char>(agora->tm_hour);
-      apducmd.nsq63.obj.time.msec = static_cast<unsigned short>(agora->tm_sec * 1000);
+      apducmd.nsq63.obj.time.year = static_cast<uint8_t>(agora->tm_year % 100);
+      apducmd.nsq63.obj.time.month = static_cast<uint8_t>(agora->tm_mon + 1);
+      apducmd.nsq63.obj.time.mday = static_cast<uint8_t>(agora->tm_mday);
+      apducmd.nsq63.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
+      apducmd.nsq63.obj.time.min = static_cast<uint8_t>(agora->tm_min);
+      apducmd.nsq63.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
+      apducmd.nsq63.obj.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000);
       apducmd.nsq63.obj.time.iv = 0;
-      apducmd.nsq63.obj.time.su = 0;
-      apducmd.nsq63.obj.time.wday = static_cast<unsigned char>(agora->tm_wday);
+      apducmd.nsq63.obj.time.su = static_cast<uint8_t>(agora->tm_isdst);
+      apducmd.nsq63.obj.time.wday = static_cast<uint8_t>(agora->tm_wday);
       apducmd.nsq63.obj.time.res1 = 0;
       apducmd.nsq63.obj.time.res2 = 0;
       apducmd.nsq63.obj.time.res3 = 0;
@@ -3149,7 +3131,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.asduh.oa = masterAddress;
       apducmd.asduh.ca = obj->ca;
       apducmd.nsq110.ioa16 = obj->address & 0x0000FFFF;
-      apducmd.nsq110.ioa8 = static_cast<unsigned char>(obj->address >> 16);
+      apducmd.nsq110.ioa8 = static_cast<uint8_t>(obj->address >> 16);
       apducmd.nsq110.obj.nva = short(obj->value);
       apducmd.nsq110.obj.kpa = obj->kpa;
       apducmd.nsq110.obj.lpc = obj->lpc;
@@ -3186,7 +3168,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.asduh.oa = masterAddress;
       apducmd.asduh.ca = obj->ca;
       apducmd.nsq111.ioa16 = obj->address & 0x0000FFFF;
-      apducmd.nsq111.ioa8 = static_cast<unsigned char>(obj->address >> 16);
+      apducmd.nsq111.ioa8 = static_cast<uint8_t>(obj->address >> 16);
       apducmd.nsq111.obj.sva = short(obj->value);
       apducmd.nsq111.obj.kpa = obj->kpa;
       apducmd.nsq111.obj.lpc = obj->lpc;
@@ -3223,7 +3205,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.asduh.oa = masterAddress;
       apducmd.asduh.ca = obj->ca;
       apducmd.nsq112.ioa16 = obj->address & 0x0000FFFF;
-      apducmd.nsq112.ioa8 = static_cast<unsigned char>(obj->address >> 16);
+      apducmd.nsq112.ioa8 = static_cast<uint8_t>(obj->address >> 16);
       apducmd.nsq112.obj.r32 = float(obj->value);
       apducmd.nsq112.obj.kpa = obj->kpa;
       apducmd.nsq112.obj.lpc = obj->lpc;
@@ -3260,7 +3242,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.asduh.oa = masterAddress;
       apducmd.asduh.ca = obj->ca;
       apducmd.nsq113.ioa16 = obj->address & 0x0000FFFF;
-      apducmd.nsq113.ioa8 = static_cast<unsigned char>(obj->address >> 16);
+      apducmd.nsq113.ioa8 = static_cast<uint8_t>(obj->address >> 16);
       apducmd.nsq113.obj.qpa = short(obj->qpa);
       sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
       VS += 2;
@@ -3288,7 +3270,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.asduh.oa = masterAddress;
       apducmd.asduh.ca = obj->ca;
       apducmd.asdu101.ioa16 = obj->address & 0x0000FFFF;
-      apducmd.asdu101.ioa8 = static_cast<unsigned char>(obj->address >> 16);
+      apducmd.asdu101.ioa8 = static_cast<uint8_t>(obj->address >> 16);
       apducmd.asdu101.frz = obj->qu;
       apducmd.asdu101.rqt = uint8_t(obj->value);
       sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
@@ -3315,7 +3297,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.asduh.oa = masterAddress;
       apducmd.asduh.ca = obj->ca;
       apducmd.asdu102.ioa16 = obj->address & 0x0000FFFF;
-      apducmd.asdu102.ioa8 = static_cast<unsigned char>(obj->address >> 16);
+      apducmd.asdu102.ioa8 = static_cast<uint8_t>(obj->address >> 16);
       sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
       VS += 2;
 

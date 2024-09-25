@@ -434,32 +434,32 @@ void MainWindow::on_pbSendCommandsButton_clicked() {
     obj.value = ui->leCmdValue->text().toDouble();
     break;
   case iec104_class::C_CS_NA_1:
-    obj.timetag.year = static_cast<unsigned char>(current.date().year() % 100);
-    obj.timetag.month = static_cast<unsigned char>(current.date().month());
-    obj.timetag.mday = static_cast<unsigned char>(current.date().day());
-    obj.timetag.hour = static_cast<unsigned char>(current.time().hour());
-    obj.timetag.min = static_cast<unsigned char>(current.time().minute());
-    obj.timetag.msec = static_cast<unsigned short>(
+    obj.timetag.year = static_cast<uint8_t>(current.date().year() % 100);
+    obj.timetag.month = static_cast<uint8_t>(current.date().month());
+    obj.timetag.mday = static_cast<uint8_t>(current.date().day());
+    obj.timetag.hour = static_cast<uint8_t>(current.time().hour());
+    obj.timetag.min = static_cast<uint8_t>(current.time().minute());
+    obj.timetag.msec = static_cast<uint16_t>(
         current.time().second() * 1000 + current.time().msec());
     obj.timetag.iv = 0;
-    obj.timetag.su = 0;
-    obj.timetag.wday = 0;
+    obj.timetag.su = static_cast<uint8_t>(current.isDaylightTime());
+    obj.timetag.wday = static_cast<uint8_t>(current.date().dayOfWeek());;
     obj.timetag.res1 = 0;
     obj.timetag.res2 = 0;
     obj.timetag.res3 = 0;
     obj.timetag.res4 = 0;
     break;
   case iec104_class::C_TS_TA_1:
-    obj.timetag.year = static_cast<unsigned char>(current.date().year() % 100);
-    obj.timetag.month = static_cast<unsigned char>(current.date().month());
-    obj.timetag.mday = static_cast<unsigned char>(current.date().day());
-    obj.timetag.hour = static_cast<unsigned char>(current.time().hour());
-    obj.timetag.min = static_cast<unsigned char>(current.time().minute());
-    obj.timetag.msec = static_cast<unsigned short>(
+    obj.timetag.year = static_cast<uint8_t>(current.date().year() % 100);
+    obj.timetag.month = static_cast<uint8_t>(current.date().month());
+    obj.timetag.mday = static_cast<uint8_t>(current.date().day());
+    obj.timetag.hour = static_cast<uint8_t>(current.time().hour());
+    obj.timetag.min = static_cast<uint8_t>(current.time().minute());
+    obj.timetag.msec = static_cast<uint16_t>(
         current.time().second() * 1000 + current.time().msec());
     obj.timetag.iv = 0;
-    obj.timetag.su = 0;
-    obj.timetag.wday = 0;
+    obj.timetag.su = static_cast<uint8_t>(current.isDaylightTime());
+    obj.timetag.wday = static_cast<uint8_t>(current.date().dayOfWeek());;
     obj.timetag.res1 = 0;
     obj.timetag.res2 = 0;
     obj.timetag.res3 = 0;
@@ -1473,8 +1473,9 @@ void MainWindow::SendOSHMI(char *msg, uint32_t packet_size) {
 void MainWindow::fmtCP56Time(char *buf, cp56time2a *timetag) {
   if (timetag->month == 0 || timetag->mday == 0)
     return;
-  sprintf(buf, "Field: %02d/%02d/%02d %02d:%02d:%02d.%03d %s", timetag->year,
+  sprintf(buf, "Field: %02d/%02d/%02d %02d:%02d:%02d.%03d %s %s", timetag->year,
           timetag->month, timetag->mday, timetag->hour, timetag->min,
           timetag->msec / 1000, timetag->msec % 1000,
-          timetag->iv ? "iv" : "ok");
+          timetag->iv ? "iv" : "ok",
+          timetag->su ? "su" : "");
 }
