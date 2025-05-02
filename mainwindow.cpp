@@ -35,6 +35,7 @@
 #include <QDir>
 #include <QItemSelectionModel>
 #include <QRegularExpression>
+#include <QSslSocket> // Needed for QSslSocket::PeerVerifyMode enum
 #include <string>
 
 using namespace std;
@@ -58,6 +59,18 @@ MainWindow::MainWindow(QWidget *parent)
 
   // busca configuracoes no arquivo ini
   QSettings settings(ininame, QSettings::IniFormat);
+
+  QString useTls = settings.value("RTU1/USE_TLS", "0").toString().trimmed();
+  QString caCertPath = settings.value("RTU1/CA_CERT_PATH", "").toString();
+  QString localCertPath = settings.value("RTU1/LOCAL_CERT_PATH", "").toString();
+  QString privateKeyPath = settings.value("RTU1/PRIVATE_KEY_PATH", "").toString();
+  QString verifyPeer = settings.value("RTU1/VERIFY_PEER", "0").toString().trimmed();
+
+  i104.setTlsEnabled(useTls!="0");
+  i104.setCaCertPath(caCertPath);
+  i104.setLocalCertPath(localCertPath);
+  i104.setPrivateKeyPath(privateKeyPath);
+  i104.setPeerVerifyMode(verifyPeer!="0" ? QSslSocket::AutoVerifyPeer : QSslSocket::QueryPeer); // Adjust if using QueryPeer etc.
 
   i104.setPrimaryAddress(settings.value("IEC104/PRIMARY_ADDRESS", 1).toInt());
   i104.ForcePrimary = settings.value("I104M/FORCE_PRIMARY", 0).toInt();
@@ -199,6 +212,21 @@ void MainWindow::on_pbConnect_clicked() {
     i104.setPortTCP(ui->lePort->text().toUInt());
     i104.setSecondaryAddress(ui->leLinkAddress->text().toInt());
     i104.setPrimaryAddress(ui->leMasterAddress->text().toInt());
+
+    /* // --- Apply TLS Settings from UI ---
+    // (Assuming UI elements like ui->cbUseTls exist)
+    bool useTls = ui->cbUseTls->isChecked();
+    QString caCertPath = ui->leCaCertPath->text();
+    QString localCertPath = ui->leLocalCertPath->text();
+    QString privateKeyPath = ui->lePrivateKeyPath->text();
+    bool verifyPeer = ui->cbVerifyPeer->isChecked();
+
+    i104.setTlsEnabled(useTls);
+    i104.setCaCertPath(caCertPath);
+    i104.setLocalCertPath(localCertPath);
+    i104.setPrivateKeyPath(privateKeyPath);
+    i104.setPeerVerifyMode(verifyPeer ? QSslSocket::VerifyPeer : QSslSocket::VerifyNone); // Adjust if using QueryPeer etc.
+    */
 
     QString qs;
     ui->leIPRemoto->setText(i104.getSecondaryIP());

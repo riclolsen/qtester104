@@ -1,4 +1,4 @@
-QTester104 Copyright © 2010-2024 Ricardo L. Olsen.
+QTester104 Copyright © 2010-2025 Ricardo L. Olsen.
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -17,11 +17,11 @@ This software implements an IEC 60870-5-104 protocol tester.
 IEC 60870-5-104 is a commonly used protocol for data acquisition and control of power substations.
 
 Directories:
-src - multiplatform qt sources, compile with QT 6.4.0 or later on any supported platform.
-bin - win32 x64 binaries built with QT 6.6.2.
+src - multiplatform qt sources, compile with QT 6.9.0 or later on any supported platform.
+bin - windows x64 binaries built with QT 6.9.0.
 conf - configuration file
 
-Can be used to poll substation data and issuing commands.
+Can be used to poll substation data and issue commands.
 The base protocol classes are pure C++ without any platform or non-standard library dependencies, can be used to develop software with other compiler/library/sdk.
 The software is part of a full substation HMI project (OSHMI - Open Substation HMI), it functions as a protocol module for the HMI, but can be used as a standalone protocol tester.
 
@@ -32,7 +32,7 @@ Protocol [Address] | Last acquired [Value] | ASDU [Type] | [Cause] of transmissi
 The protocol quality flags are:
 on / off / tra (double point transition) / ind (double point indefinite) / bl (blocked) / iv (invalid) / nt (not topical) / sb (substituted) / ov (overflow) / t (reg.step transition).
 
-An optional configuration file can be used to store basic parameters, in the form of a INI file (qtester104.ini):
+An optional configuration file can be used to store parameters, in the form of a INI file (qtester104.ini):
 
 [BDTR]
 ; 0 (default): Normal operation mode
@@ -47,10 +47,16 @@ SECONDARY_ADDRESS=2      ; protocol link address of the RTU
 IP_ADDRESS=192.168.1.1   ; IP address of the RTU
 ; IP_ADDRESS_BACKUP=192.168.1.2   ; IP address of the BACKUP RTU
 ALLOW_COMMANDS=1         ; 1=allow sending commands, 0=don't permit commands
-; PORT=2404              ; Protocol port (default=2404)
-; GI_PERIOD = 330        ; time period in seconds for general interrogations (default=330s)
+PORT=2404              ; Protocol port (default=2404)
+; GI_PERIOD = 330        ; time period in seconds for automatic general interrogations (default=330s, 0=disable)
 
-Thank you for the interest, please fell free to comment and contribute.
+USE_TLS=0                                              ; 1=use TLS, 0=use plain TCP 
+CA_CERT_PATH=c:/temp/ca.crt                            ; root CA certificate in PEM format
+LOCAL_CERT_PATH=c:/temp/client.crt                     ; client certificate in PEM format
+PRIVATE_KEY_PATH=c:/temp/client_unencrypted.key        ; cliente key in unencrypted PEM format
+VERIFY_PEER=0                                          ; 1=verify server certificate against CA root 0=do not check server certificate
+
+Thank you for the interest, please feel free to comment and contribute.
 
 
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
