@@ -36,6 +36,9 @@
 #include <QItemSelectionModel>
 #include <QRegularExpression>
 #include <QSslSocket> // Needed for QSslSocket::PeerVerifyMode enum
+#include <QPalette>
+#include <QStyleFactory>
+#include <QSettings>
 #include <string>
 
 using namespace std;
@@ -94,6 +97,20 @@ MainWindow::MainWindow(QWidget *parent)
   I104M_CntDnToBePrimary = I104M_CntToBePrimary;
 
   ui->setupUi(this);
+
+  // TLS checkbox visibility logic
+  if (ui->cbEnableTls) {
+      ui->cbEnableTls->setVisible(useTls != "0");
+      ui->cbEnableTls->setChecked(useTls != "0");
+  }
+
+  if (ui->cbLog->isChecked()) {
+      i104.mLog.activateLog();
+      QDate dt = QDate::currentDate();
+      QString str = dt.toString() + QString(" - ") + QString(QTESTER_VERSION);
+      i104.mLog.pushMsg(str.toStdString().c_str());
+  } else
+      i104.mLog.deactivateLog();
 
   // this is for hiding the window when runnig
   Hide = settings_oshmi.value("RUN/HIDE", "").toInt();
@@ -191,6 +208,11 @@ MainWindow::MainWindow(QWidget *parent)
   font.setPointSize(9);
   font.setFixedPitch(true);
   ui->lwLog->setFont(font);
+
+  // Set default theme to Light
+  ui->cbTheme->setCurrentIndex(0);
+  on_cbTheme_currentIndexChanged(0);
+  connect(ui->cbTheme, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MainWindow::on_cbTheme_currentIndexChanged);
 }
 
 MainWindow::~MainWindow() {
@@ -215,7 +237,7 @@ void MainWindow::on_pbConnect_clicked() {
 
     /* // --- Apply TLS Settings from UI ---
     // (Assuming UI elements like ui->cbUseTls exist)
-    bool useTls = ui->cbUseTls->isChecked();
+    bool useTls = ui->cbEnableTls->isChecked();
     QString caCertPath = ui->leCaCertPath->text();
     QString localCertPath = ui->leLocalCertPath->text();
     QString privateKeyPath = ui->lePrivateKeyPath->text();
@@ -227,6 +249,8 @@ void MainWindow::on_pbConnect_clicked() {
     i104.setPrivateKeyPath(privateKeyPath);
     i104.setPeerVerifyMode(verifyPeer ? QSslSocket::VerifyPeer : QSslSocket::VerifyNone); // Adjust if using QueryPeer etc.
     */
+
+    i104.setTlsEnabled(ui->cbEnableTls->isChecked());
 
     QString qs;
     ui->leIPRemoto->setText(i104.getSecondaryIP());
@@ -696,7 +720,7 @@ void MainWindow::slot_dataIndication(iec_obj *obj, unsigned numpoints) {
 
       case iec104_class::M_PS_NA_1: // 38
         sprintf(buf,
-                "%s%s%s%s%s ST %d%d%d%d %d%d%d%d %d%d%d%d %d%d%d%d CH %d%d%d%d "
+                "%s%s%s%s%s ST %d%d%d%d %d%d%d%d %d%d%d%d %d%d%d%d %d%d%d%d CH %d%d%d%d "
                 "%d%d%d%d %d%d%d%d %d%d%d%d [1-16]",
                 obj->ov ? "ov " : "", obj->bl ? "bl " : "",
                 obj->nt ? "nt " : "", obj->sb ? "sb " : "",
@@ -802,13 +826,13 @@ void MainWindow::slot_timer_logmsg() {
 
       if (ui->lwLog->item(cntLogMsgs % logBufSize)->text().indexOf("I104M") >=
           0) {
-        ui->lwLog->item(cntLogMsgs % logBufSize)->setForeground(Qt::lightGray);
+        ui->lwLog->item(cntLogMsgs % logBufSize)->setForeground(Qt::darkGray);
         ui->lwLog->item(cntLogMsgs % logBufSize)
             ->setBackground(Qt::transparent);
       } else if (ui->lwLog->item(cntLogMsgs % logBufSize)
                      ->text()
                      .indexOf("COMMAND") >= 0) {
-        ui->lwLog->item(cntLogMsgs % logBufSize)->setForeground(Qt::black);
+        ui->lwLog->item(cntLogMsgs % logBufSize)->setForeground(Qt::darkGray);
         ui->lwLog->item(cntLogMsgs % logBufSize)->setBackground(Qt::lightGray);
       } else if (ui->lwLog->item(cntLogMsgs % logBufSize)
                      ->text()
@@ -817,7 +841,7 @@ void MainWindow::slot_timer_logmsg() {
         ui->lwLog->item(cntLogMsgs % logBufSize)
             ->setBackground(Qt::transparent);
       } else {
-        ui->lwLog->item(cntLogMsgs % logBufSize)->setForeground(Qt::black);
+        ui->lwLog->item(cntLogMsgs % logBufSize)->setForeground(Qt::darkGray);
         ui->lwLog->item(cntLogMsgs % logBufSize)
             ->setBackground(Qt::transparent);
       }
@@ -1507,3 +1531,35 @@ void MainWindow::fmtCP56Time(char *buf, cp56time2a *timetag) {
           timetag->iv ? "iv" : "ok",
           timetag->su ? "su" : "");
 }
+
+void MainWindow::on_cbTheme_currentIndexChanged(int index) {
+    if (index == 1) { // Dark
+        qApp->setStyle(QStyleFactory::create("Fusion"));
+        QPalette darkPalette;
+        darkPalette.setColor(QPalette::Window, QColor(53,53,53));
+        darkPalette.setColor(QPalette::WindowText, Qt::white);
+        darkPalette.setColor(QPalette::Base, QColor(25,25,25));
+        darkPalette.setColor(QPalette::AlternateBase, QColor(53,53,53));
+        darkPalette.setColor(QPalette::ToolTipBase, Qt::white);
+        darkPalette.setColor(QPalette::ToolTipText, Qt::white);
+        darkPalette.setColor(QPalette::Text, Qt::white);
+        darkPalette.setColor(QPalette::Button, QColor(53,53,53));
+        darkPalette.setColor(QPalette::ButtonText, Qt::white);
+        darkPalette.setColor(QPalette::BrightText, Qt::red);
+        darkPalette.setColor(QPalette::Link, QColor(42, 130, 218));
+        darkPalette.setColor(QPalette::Highlight, QColor(42, 130, 218));
+        darkPalette.setColor(QPalette::HighlightedText, Qt::black);
+        qApp->setPalette(darkPalette);
+    } else { // Light
+        qApp->setStyle(QStyleFactory::create("Fusion"));
+        QPalette sp = QApplication::style()->standardPalette();
+        sp.setColor(QPalette::Text, Qt::black);
+        qApp->setPalette(sp);
+    }
+}
+
+void MainWindow::on_cbEnableTls_stateChanged(int arg1)
+{
+    i104.setTlsEnabled(ui->cbEnableTls->isChecked());
+}
+

@@ -42,7 +42,7 @@
 #include "iec104_class.h"
 #include "qiec104.h"
 
-#define QTESTER_VERSION "v2.7.0"
+#define QTESTER_VERSION "v2.7.1"
 #define QTESTER_COPYRIGHT "Copyright © 2010-2025 Ricardo Lastra Olsen"
 #define CURDIRINIFILENAME "/qtester104.ini"
 #define CONFDIRINIFILENAME "../conf/qtester104.ini"
@@ -78,8 +78,11 @@ class MainWindow : public QMainWindow {
 
   void on_pbCopyClipb_clicked(); // copy log messages to clipboard
   void on_pbCopyVals_clicked(); // copy values table to clipboard
+  void on_cbTheme_currentIndexChanged(int index); // Theme selection changed
 
- private:
+  void on_cbEnableTls_stateChanged(int arg1);
+
+  private:
   std::map <std::pair<int, int>, QTableWidgetItem*> mapPtItem_ColAddress; // map of points to cells of table
   std::map <std::pair<int, int>, QTableWidgetItem*> mapPtItem_ColCommonAddress;
   std::map <std::pair<int, int>, QTableWidgetItem*> mapPtItem_ColValue;
