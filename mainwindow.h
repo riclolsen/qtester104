@@ -42,7 +42,7 @@
 #include "iec104_class.h"
 #include "qiec104.h"
 
-#define QTESTER_VERSION "v2.7.1"
+#define QTESTER_VERSION "v2.7.2"
 #define QTESTER_COPYRIGHT "Copyright © 2010-2025 Ricardo Lastra Olsen"
 #define CURDIRINIFILENAME "/qtester104.ini"
 #define CONFDIRINIFILENAME "../conf/qtester104.ini"
