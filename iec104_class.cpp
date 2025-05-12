@@ -642,7 +642,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
       VR_NEW = (papdu->NS & 0xFFFE);
 
       // if (VR_NEW != VR) {
-      if (VR_NEW != VR && VR_NEW != 1) { // allows for counting beginning with 1
+      if (VR_NEW != VR && VR_NEW != 2) { //  Allow initial I-frame from Slave with TX=1
         // sequence error, must close and reopen connection
         mLog.pushMsg("*** SEQUENCE ERROR! **************************");
         if (seq_order_check) {
