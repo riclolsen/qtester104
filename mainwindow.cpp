@@ -1,6 +1,6 @@
 /*
  * This software implements an IEC 60870-5-104 protocol tester.
- * Copyright © 2010-2024 Ricardo L. Olsen
+ * Copyright © 2010-present Ricardo L. Olsen
  *
  * Disclaimer
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
@@ -37,7 +37,7 @@
 #include <QItemSelectionModel>
 #include <QRegularExpression>
 #include <QMetaObject>
-#include <QSslSocket> // Needed for QSslSocket::PeerVerifyMode enum
+#include <QSslSocket>
 #include <QPalette>
 #include <QStyleFactory>
 #include <QSettings>
@@ -94,7 +94,10 @@ void MainWindow::shutdownProtocolThread() {
 
 //-------------------------------------------------------------------------------------------------------------------------
 
-MainWindow::MainWindow(QWidget *parent)
+MainWindow::MainWindow(const QString& iniPath,
+                       const QString& rtuSection,
+                       bool enableI104M,
+                       QWidget *parent)
     : QMainWindow(parent),
       ui(new Ui::MainWindow),
       tmLogMsg(nullptr),
@@ -103,6 +106,8 @@ MainWindow::MainWindow(QWidget *parent)
       pendingDataPointCount(0),
       pointTableSortPending(false),
       pointTableResizePending(false),
+      logTickCount(0),
+      logCircularIndex(0),
       LastCommandAddress(0),
       SendCommands(0),
       Hide(0),
@@ -111,12 +116,18 @@ MainWindow::MainWindow(QWidget *parent)
       ForcePrimary(0),
       ProtocolKeepAliveActive(false),
       ProtocolShutdown(false),
-      ProtocolPort(2404) {
+      IniPath(iniPath),
+      RtuSection(rtuSection),
+      ProtocolPort(2404),
+      EnableI104M(enableI104M) {
   I104M_Logar = 1;
   i104->mLog.deactivateLog();
 
   // look for the ini file in the application dir, if not found use the conf dir
-  QString ininame = QCoreApplication::applicationDirPath() + CURDIRINIFILENAME;
+  QString ininame = IniPath;
+  if (ininame.isEmpty()) {
+    ininame = QCoreApplication::applicationDirPath() + CURDIRINIFILENAME;
+  }
   if (!QFile(ininame).exists()) {
     ininame = CONFDIRINIFILENAME;
   }
@@ -127,24 +138,25 @@ MainWindow::MainWindow(QWidget *parent)
 
   // busca configuracoes no arquivo ini
   QSettings settings(ininame, QSettings::IniFormat);
+  const QString rtuPrefix = RtuSection + "/";
 
-  QString useTls = settings.value("RTU1/USE_TLS", "0").toString().trimmed();
-  QString caCertPath = settings.value("RTU1/CA_CERT_PATH", "").toString();
-  QString localCertPath = settings.value("RTU1/LOCAL_CERT_PATH", "").toString();
-  QString privateKeyPath = settings.value("RTU1/PRIVATE_KEY_PATH", "").toString();
-  QString verifyPeer = settings.value("RTU1/VERIFY_PEER", "0").toString().trimmed();
+  QString useTls = settings.value(rtuPrefix + "USE_TLS", "0").toString().trimmed();
+  QString caCertPath = settings.value(rtuPrefix + "CA_CERT_PATH", "").toString();
+  QString localCertPath = settings.value(rtuPrefix + "LOCAL_CERT_PATH", "").toString();
+  QString privateKeyPath = settings.value(rtuPrefix + "PRIVATE_KEY_PATH", "").toString();
+  QString verifyPeer = settings.value(rtuPrefix + "VERIFY_PEER", "0").toString().trimmed();
 
   PrimaryAddress = settings.value("IEC104/PRIMARY_ADDRESS", 1).toInt();
   ForcePrimary = settings.value("I104M/FORCE_PRIMARY", 0).toInt();
-  SecondaryAddress = settings.value("RTU1/SECONDARY_ADDRESS", 1).toInt();
-  SendCommands = settings.value("RTU1/ALLOW_COMMANDS", 0).toInt();
+  SecondaryAddress = settings.value(rtuPrefix + "SECONDARY_ADDRESS", 1).toInt();
+  SendCommands = settings.value(rtuPrefix + "ALLOW_COMMANDS", 0).toInt();
 
   QString IPEscravo;
-  QString IPEscravoBackup = settings.value("RTU1/IP_ADDRESS_BACKUP", "").toString();
-  IPEscravo = settings.value("RTU1/IP_ADDRESS", "").toString();
+  QString IPEscravoBackup = settings.value(rtuPrefix + "IP_ADDRESS_BACKUP", "").toString();
+  IPEscravo = settings.value(rtuPrefix + "IP_ADDRESS", "").toString();
   SecondaryIp = IPEscravo;
-  ProtocolPort = settings.value("RTU1/TCP_PORT", ProtocolPort).toUInt();
-  const unsigned giPeriod = settings.value("RTU1/GI_PERIOD", 330).toUInt();
+  ProtocolPort = settings.value(rtuPrefix + "TCP_PORT", ProtocolPort).toUInt();
+  const unsigned giPeriod = settings.value(rtuPrefix + "GI_PERIOD", 330).toUInt();
   const QSslSocket::PeerVerifyMode verifyMode =
       verifyPeer != "0" ? QSslSocket::AutoVerifyPeer : QSslSocket::QueryPeer;
 
@@ -156,6 +168,12 @@ MainWindow::MainWindow(QWidget *parent)
   I104M_CntDnToBePrimary = I104M_CntToBePrimary;
 
   ui->setupUi(this);
+  if (menuBar()) {
+    menuBar()->hide();
+  }
+  if (statusBar()) {
+    statusBar()->hide();
+  }
   on_cb888Mode_stateChanged(ui->cb888Mode->isChecked());
 
   // TLS checkbox visibility logic
@@ -189,9 +207,11 @@ MainWindow::MainWindow(QWidget *parent)
   QValidator *valip = new QRegularExpressionValidator(rx, this);
   ui->leIPRemoto->setValidator(valip);
 
-  udps = new QUdpSocket();
-  udps->bind(I104M_porta_escuta);
-  udps->open(QIODevice::ReadWrite);
+  if (EnableI104M) {
+    udps = new QUdpSocket(this);
+    udps->bind(I104M_porta_escuta);
+    udps->open(QIODevice::ReadWrite);
+  }
 
   QString qs;
   QTextStream(&qs) << ProtocolPort;
@@ -213,7 +233,9 @@ MainWindow::MainWindow(QWidget *parent)
   i104->moveToThread(&protocolThread);
   protocolThread.start();
 
-  connect(udps, SIGNAL(readyRead()), this, SLOT(slot_I104M_ready_to_read()));
+  if (udps != nullptr) {
+    connect(udps, SIGNAL(readyRead()), this, SLOT(slot_I104M_ready_to_read()));
+  }
   connect(tmLogMsg, SIGNAL(timeout()), this, SLOT(slot_timer_logmsg()));
   connect(tmUiDataPump, SIGNAL(timeout()), this, SLOT(slot_processPendingUiData()));
   connect(tmI104M_kamsg, SIGNAL(timeout()), this,
@@ -271,7 +293,7 @@ MainWindow::MainWindow(QWidget *parent)
 
   tmLogMsg->start(350);
 
-  if (I104M_HaveDualHost()) {
+  if (EnableI104M && I104M_HaveDualHost()) {
     tmI104M_kamsg->start(I104M_seconds_kamsg * 1000);
     isPrimary = false;
     queueProtocolCall([](QIec104* worker) { worker->disable_connect(); });
@@ -382,6 +404,10 @@ void MainWindow::on_pbConnect_clicked() {
 
 // receive data/commands from OSHMI
 void MainWindow::slot_I104M_ready_to_read() {
+  if (udps == nullptr) {
+    return;
+  }
+
   char buf[5000];
 
   unsigned char br[2000]; // buffer de recepcao
@@ -963,17 +989,15 @@ void MainWindow::processDataIndicationBatch(const QVector<iec_obj>& objects) {
 }
 
 void MainWindow::slot_timer_logmsg() {
-  static int count = 0;
   static const int logBufSize = 20000;
   static const int maxLogMsgsPerTick = 250;
-  static int cntLogMsgs = 0; // index for circular buffer of log messages
 
   if (Hide)
-    if (this->isVisible())
-      this->setVisible(false);
+    if (window() && window()->isVisible())
+      window()->setVisible(false);
 
   // adjust size of rows and columns
-  if (!(++count % 50))
+  if (!(++logTickCount % 50))
     if (pointTableResizePending && pendingDataIndications.isEmpty()) {
       ui->twPontos->resizeRowsToContents();
       ui->twPontos->resizeColumnsToContents();
@@ -989,44 +1013,44 @@ void MainWindow::slot_timer_logmsg() {
         ui->lwLog->addItem(i104->mLog.pullMsg().c_str());
       } else {
         // buffer filled: rewrite lines
-        ui->lwLog->item(cntLogMsgs % logBufSize)
+        ui->lwLog->item(logCircularIndex % logBufSize)
             ->setText(i104->mLog.pullMsg().c_str());
         // Marks end of circular buffer
-        ui->lwLog->item((cntLogMsgs + 1) % logBufSize)
+        ui->lwLog->item((logCircularIndex + 1) % logBufSize)
             ->setText("=================================================");
-        ui->lwLog->item((cntLogMsgs + 1) % logBufSize)
+        ui->lwLog->item((logCircularIndex + 1) % logBufSize)
             ->setForeground(Qt::green);
-        ui->lwLog->item((cntLogMsgs + 1) % logBufSize)
+        ui->lwLog->item((logCircularIndex + 1) % logBufSize)
             ->setBackground(Qt::yellow);
       }
 
-      if (ui->lwLog->item(cntLogMsgs % logBufSize)->text().indexOf("I104M") >=
+      if (ui->lwLog->item(logCircularIndex % logBufSize)->text().indexOf("I104M") >=
           0) {
-        ui->lwLog->item(cntLogMsgs % logBufSize)->setForeground(Qt::darkGray);
-        ui->lwLog->item(cntLogMsgs % logBufSize)
+        ui->lwLog->item(logCircularIndex % logBufSize)->setForeground(Qt::darkGray);
+        ui->lwLog->item(logCircularIndex % logBufSize)
             ->setBackground(Qt::transparent);
-      } else if (ui->lwLog->item(cntLogMsgs % logBufSize)
+      } else if (ui->lwLog->item(logCircularIndex % logBufSize)
                      ->text()
                      .indexOf("COMMAND") >= 0) {
-        ui->lwLog->item(cntLogMsgs % logBufSize)->setForeground(Qt::darkGray);
-        ui->lwLog->item(cntLogMsgs % logBufSize)->setBackground(Qt::lightGray);
-      } else if (ui->lwLog->item(cntLogMsgs % logBufSize)
+        ui->lwLog->item(logCircularIndex % logBufSize)->setForeground(Qt::darkGray);
+        ui->lwLog->item(logCircularIndex % logBufSize)->setBackground(Qt::lightGray);
+      } else if (ui->lwLog->item(logCircularIndex % logBufSize)
                      ->text()
                      .indexOf("[") >= 0) {
-        ui->lwLog->item(cntLogMsgs % logBufSize)->setForeground(Qt::red);
-        ui->lwLog->item(cntLogMsgs % logBufSize)
+        ui->lwLog->item(logCircularIndex % logBufSize)->setForeground(Qt::red);
+        ui->lwLog->item(logCircularIndex % logBufSize)
             ->setBackground(Qt::transparent);
       } else {
-        ui->lwLog->item(cntLogMsgs % logBufSize)->setForeground(Qt::darkGray);
-        ui->lwLog->item(cntLogMsgs % logBufSize)
+        ui->lwLog->item(logCircularIndex % logBufSize)->setForeground(Qt::darkGray);
+        ui->lwLog->item(logCircularIndex % logBufSize)
             ->setBackground(Qt::transparent);
       }
-      cntLogMsgs++;
+      logCircularIndex++;
       logMsgsProcessed++;
     }
 
     if (ui->cbAutoScroll->isChecked()) {
-      ui->lwLog->scrollToItem(ui->lwLog->item((cntLogMsgs - 1) % logBufSize),
+      ui->lwLog->scrollToItem(ui->lwLog->item((logCircularIndex - 1) % logBufSize),
                               QAbstractItemView::PositionAtBottom);
     }
     ui->lwLog->setUpdatesEnabled(true);
@@ -1046,7 +1070,7 @@ void MainWindow::slot_tcpconnect(const QString& peerAddress) {
 }
 
 void MainWindow::slot_tcpdisconnect() {
-  if (I104M_HaveDualHost() && isPrimary == true) {
+  if (EnableI104M && I104M_HaveDualHost() && isPrimary == true) {
     I104M_CntDnToBePrimary =
         I104M_CntToBePrimary + 1; // wait a little more time to be primary again
                                   // to allow for the secondary to assume
@@ -1260,7 +1284,8 @@ void MainWindow::slot_commandActRespIndication(const iec_obj& obj) {
 
       // respond to I104M only if it's not a select or if its a negative
       // response
-      if (is_select == false || obj.pn == iec104_class::NEGATIVE) {
+      if ((is_select == false || obj.pn == iec104_class::NEGATIVE) &&
+          EnableI104M && udps != nullptr) {
         t_msgsup I104M_msg;
         I104M_msg.signature = MSGSUP_SIG;
         I104M_msg.tipo = obj.type;
@@ -1332,6 +1357,10 @@ void MainWindow::closeEvent(QCloseEvent *event) {
 }
 
 void MainWindow::slot_timer_I104M_kamsg() {
+  if (!EnableI104M || udps == nullptr) {
+    return;
+  }
+
   if (!isPrimary) {
     if (I104M_CntDnToBePrimary <= 0) {
       isPrimary = true;
@@ -1394,6 +1423,10 @@ void MainWindow::on_pbCopyVals_clicked() {
 }
 
 void MainWindow::I104M_processPoints(const iec_obj *obj, unsigned numpoints) {
+  if (!EnableI104M || udps == nullptr || numpoints == 0) {
+    return;
+  }
+
   t_msgsupsq msg;
 
   switch (obj->type) {
@@ -1696,6 +1729,10 @@ void MainWindow::I104M_processPoints(const iec_obj *obj, unsigned numpoints) {
 }
 
 void MainWindow::SendOSHMI(char *msg, uint32_t packet_size) {
+  if (udps == nullptr) {
+    return;
+  }
+
   udps->writeDatagram(reinterpret_cast<const char *>(msg), packet_size,
                       I104M_host, I104M_porta);
   if (I104M_HaveDualHost())

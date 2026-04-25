@@ -1,4 +1,4 @@
-QTester104 Copyright © 2010-2025 Ricardo L. Olsen.
+QTester104 Copyright © 2010-present Ricardo L. Olsen.
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -17,8 +17,8 @@ This software implements an IEC 60870-5-104 protocol tester.
 IEC 60870-5-104 is a commonly used protocol for data acquisition and control of power substations.
 
 Directories:
-src - multiplatform qt sources, compile with QT 6.9.0 or later on any supported platform.
-bin - windows x64 binaries built with QT 6.9.0.
+src - multiplatform qt sources, compile with QT 6.10.0 or later on any supported platform.
+bin - windows x64 binaries.
 conf - configuration file
 
 Can be used to poll substation data and issue commands.
@@ -42,13 +42,19 @@ An optional configuration file can be used to store parameters, in the form of a
 [IEC104] 
 PRIMARY_ADDRESS=1        ; link address of the primary station (computer)
 
-[RTU1]                   ; communicates with only one RTU in this version
+[RTU1]                   ; one section per IEC104 server/client tab
 SECONDARY_ADDRESS=2      ; protocol link address of the RTU
 IP_ADDRESS=192.168.1.1   ; IP address of the RTU
 ; IP_ADDRESS_BACKUP=192.168.1.2   ; IP address of the BACKUP RTU
 ALLOW_COMMANDS=1         ; 1=allow sending commands, 0=don't permit commands
 PORT=2404              ; Protocol port (default=2404)
 ; GI_PERIOD = 330        ; time period in seconds for automatic general interrogations (default=330s, 0=disable)
+
+[RTU2]                   ; optional second IEC104 client in its own tab/thread
+SECONDARY_ADDRESS=3
+IP_ADDRESS=192.168.1.3
+ALLOW_COMMANDS=0
+PORT=2404
 
 USE_TLS=0                                              ; 1=use TLS, 0=use plain TCP 
 CA_CERT_PATH=c:/temp/ca.crt                            ; root CA certificate in PEM format

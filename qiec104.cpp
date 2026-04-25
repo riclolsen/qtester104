@@ -1,6 +1,6 @@
 /*
  * This software implements an IEC 60870-5-104 protocol tester.
- * Copyright © 2010-2024 Ricardo L. Olsen
+ * Copyright © 2010-present Ricardo L. Olsen
  *
  * Disclaimer
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
@@ -37,6 +37,8 @@
 QIec104::QIec104(QObject *parent) : QObject(parent) {
   mEnding = false;
   mAllowConnect = true;
+  mConnectAttemptCounter = 0;
+  mKeepAliveCounter = 1;
   SendCommands = 0;
   ForcePrimary = 0;
   mLog.activateLog();
@@ -111,7 +113,6 @@ void QIec104::dataIndication(iec_obj *obj, unsigned numpoints) {
 }
 
 void QIec104::connectTCP() {
-  static int cnt = 0;
   char buf[100];
 
   tcps->abort();
@@ -203,7 +204,7 @@ void QIec104::connectTCP() {
       }
 
     // alternate main and backup UTR IP address, if configured
-    if ((++cnt) % 2 || strcmp(getSecondaryIP_backup(), "") == 0) {
+    if ((++mConnectAttemptCounter) % 2 || strcmp(getSecondaryIP_backup(), "") == 0) {
 
       if (mUseTls) {
         tcps->connectToHostEncrypted(getSecondaryIP(), quint16(getPortTCP()));
@@ -282,12 +283,10 @@ void QIec104::slot_tcpdisconnect() {
 }
 
 void QIec104::slot_keep_alive() {
-  static unsigned int cnts = 1;
-
   if (!mEnding) {
-    cnts++;
+    mKeepAliveCounter++;
 
-    if (!(cnts % 5))
+    if (!(mKeepAliveCounter % 5))
       if (tcps->state() != QAbstractSocket::ConnectedState && mAllowConnect) {
         mLog.pushMsg("!!!!!TRY TO CONNECT!");
         connectTCP();

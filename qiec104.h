@@ -1,6 +1,6 @@
 /*
  * This software implements an IEC 60870-5-104 protocol tester.
- * Copyright © 2010-2024 Ricardo L. Olsen
+ * Copyright © 2010-present Ricardo L. Olsen
  *
  * Disclaimer
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
@@ -99,6 +99,8 @@ private:
   void dataIndication(iec_obj *obj, unsigned numpoints);
   bool mEnding;
   bool mAllowConnect;
+  int mConnectAttemptCounter;
+  unsigned int mKeepAliveCounter;
 
   // TLS Configuration Members
   bool mUseTls = false;

@@ -1,6 +1,6 @@
 /*
  * This software implements an IEC 60870-5-104 protocol tester.
- * Copyright © 2010-2024 Ricardo L. Olsen
+ * Copyright © 2010-present Ricardo L. Olsen
  *
  * Disclaimer
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
@@ -45,8 +45,8 @@
 #include "iec104_class.h"
 #include "qiec104.h"
 
-#define QTESTER_VERSION "v2.7.5"
-#define QTESTER_COPYRIGHT "Copyright © 2010-2026 Ricardo Lastra Olsen"
+#define QTESTER_VERSION "v3.0.0"
+#define QTESTER_COPYRIGHT "© 2010-present Ricardo Lastra Olsen"
 #define CURDIRINIFILENAME "/qtester104.ini"
 #define CONFDIRINIFILENAME "../conf/qtester104.ini"
 
@@ -61,7 +61,10 @@ class MainWindow : public QMainWindow {
   void closeEvent(QCloseEvent* event);
 
  public:
-  MainWindow(QWidget* parent = nullptr);
+  MainWindow(const QString& iniPath = QString(),
+             const QString& rtuSection = QStringLiteral("RTU1"),
+             bool enableI104M = true,
+             QWidget* parent = nullptr);
   ~MainWindow();
 
  private slots:
@@ -111,6 +114,8 @@ class MainWindow : public QMainWindow {
   qsizetype pendingDataPointCount;
   bool pointTableSortPending;
   bool pointTableResizePending;
+  int logTickCount;
+  int logCircularIndex;
 
   unsigned LastCommandAddress;
   int SendCommands;             // 1 = allow sending commands, 0 = don't send commands
@@ -121,7 +126,10 @@ class MainWindow : public QMainWindow {
   bool ProtocolKeepAliveActive;
   bool ProtocolShutdown;
   QString SecondaryIp;
+  QString IniPath;
+  QString RtuSection;
   unsigned ProtocolPort;
+  bool EnableI104M;
 
   // I104M Related
   void I104M_Loga(QString str, int id = 0); // I104M: log messages

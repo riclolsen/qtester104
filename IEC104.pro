@@ -6,11 +6,13 @@ QT += network \
 TARGET = QTester104
 TEMPLATE = app
 SOURCES += main.cpp \
+    appwindow.cpp \
     mainwindow.cpp \
     iec104_class.cpp \
     logmsg.cpp \
     qiec104.cpp
-HEADERS += mainwindow.h \
+HEADERS += appwindow.h \
+    mainwindow.h \
     iec104_types.h \
     iec104_class.h \
     logmsg.h \

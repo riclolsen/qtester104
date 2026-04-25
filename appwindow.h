@@ -27,19 +27,28 @@
  * 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
  */
 
-#include <QtWidgets/QApplication>
-#include <QMetaType>
-#include <QVector>
-#include "iec104_class.h"
-#include "appwindow.h"
+#ifndef APPWINDOW_H
+#define APPWINDOW_H
 
-int main(int argc, char *argv[])
-{
-    QApplication a(argc, argv);
-    qRegisterMetaType<iec_obj>("iec_obj");
-    qRegisterMetaType<QVector<iec_obj>>("QVector<iec_obj>");
-    AppWindow w;
+#include <QMainWindow>
 
-    w.show();
-    return a.exec();
-}
+class QSettings;
+class QTabWidget;
+
+class AppWindow : public QMainWindow {
+  Q_OBJECT
+
+ public:
+  explicit AppWindow(QWidget* parent = nullptr);
+  ~AppWindow() override;
+
+ private:
+  QString resolveIniPath() const;
+  QStringList discoverRtuSections(QSettings& settings) const;
+  QString tabTitleForSection(QSettings& settings, const QString& section) const;
+
+  QTabWidget* mTabs;
+  QString mIniPath;
+};
+
+#endif // APPWINDOW_H
