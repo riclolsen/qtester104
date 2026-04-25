@@ -311,11 +311,45 @@ Use 1 or 2 for digital double</string>
      </widget>
     </item>
     <item row="3" column="1">
-     <widget class="QLineEdit" name="leCmdAddress">
-      <property name="toolTip">
-       <string>Enter the command object address</string>
-      </property>
-     </widget>
+     <layout class="QHBoxLayout" name="horizontalLayoutCmdAddress">
+      <item>
+       <widget class="QLineEdit" name="leCmdAddressLow">
+        <property name="placeholderText">
+         <string>Low</string>
+        </property>
+        <property name="toolTip">
+         <string>Low Octet</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="leCmdAddressMid">
+        <property name="placeholderText">
+         <string>Mid</string>
+        </property>
+        <property name="toolTip">
+         <string>Mid Octet</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="leCmdAddressHigh">
+        <property name="placeholderText">
+         <string>High</string>
+        </property>
+        <property name="toolTip">
+         <string>High Octet</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="leCmdAddress">
+        <property name="toolTip">
+         <string>Enter the command object address (24-bit Decimal)</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
     </item>
     <item row="0" column="2">
      <widget class="QLabel" name="label_2">
@@ -412,6 +446,16 @@ If empty will use remote link address.</string>
       </property>
      </widget>
     </item>
+    <item row="5" column="4">
+     <widget class="QCheckBox" name="cb888Mode">
+      <property name="text">
+       <string>8-8-8 IOA Format</string>
+      </property>
+      <property name="checked">
+       <bool>true</bool>
+      </property>
+     </widget>
+    </item>
     <item row="5" column="2">
      <widget class="QCheckBox" name="cbAutoScroll">
       <property name="text">
@@ -479,6 +523,9 @@ If empty will use remote link address.</string>
   <tabstop>leLinkAddress</tabstop>
   <tabstop>leMasterAddress</tabstop>
   <tabstop>pbSendCommandsButton</tabstop>
+  <tabstop>leCmdAddressLow</tabstop>
+  <tabstop>leCmdAddressMid</tabstop>
+  <tabstop>leCmdAddressHigh</tabstop>
   <tabstop>leCmdAddress</tabstop>
   <tabstop>leCmdValue</tabstop>
   <tabstop>leASDUAddr</tabstop>
@@ -486,6 +533,7 @@ If empty will use remote link address.</string>
   <tabstop>cbCmdDuration</tabstop>
   <tabstop>cbSBO</tabstop>
   <tabstop>pbCopyVals</tabstop>
+  <tabstop>cb888Mode</tabstop>
   <tabstop>cbPointMap</tabstop>
   <tabstop>lwLog</tabstop>
   <tabstop>twPontos</tabstop>

@@ -81,6 +81,7 @@ class MainWindow : public QMainWindow {
   void on_cbTheme_currentIndexChanged(int index); // Theme selection changed
 
   void on_cbEnableTls_stateChanged(int arg1);
+  void on_cb888Mode_stateChanged(int arg1);
 
   private:
   std::map <std::pair<int, int>, QTableWidgetItem*> mapPtItem_ColAddress; // map of points to cells of table

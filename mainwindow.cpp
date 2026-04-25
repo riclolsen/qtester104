@@ -43,6 +43,19 @@
 
 using namespace std;
 
+static unsigned int parseIoa(const QString& str) {
+    if (str.contains('-') || str.contains('.')) {
+        QStringList parts = str.split(QRegularExpression("[-.]"));
+        if (parts.size() >= 3) {
+            unsigned int low = parts[0].toUInt();
+            unsigned int mid = parts[1].toUInt();
+            unsigned int high = parts[2].toUInt();
+            return low + (mid << 8) + (high << 16);
+        }
+    }
+    return str.toUInt();
+}
+
 //-------------------------------------------------------------------------------------------------------------------------
 
 MainWindow::MainWindow(QWidget *parent)
@@ -97,6 +110,7 @@ MainWindow::MainWindow(QWidget *parent)
   I104M_CntDnToBePrimary = I104M_CntToBePrimary;
 
   ui->setupUi(this);
+  on_cb888Mode_stateChanged(ui->cb888Mode->isChecked());
 
   // TLS checkbox visibility logic
   if (ui->cbEnableTls) {
@@ -425,9 +439,13 @@ void MainWindow::on_pbSendCommandsButton_clicked() {
           .toUInt());
 
   if (obj.type == iec104_class::C_RD_NA_1) {
-    if (ui->leCmdAddress->text().trimmed() == "")
-      return;
-    obj.address = ui->leCmdAddress->text().toUInt();
+    if (ui->cb888Mode->isChecked()) {
+        if (ui->leCmdAddressLow->text().trimmed() == "" && ui->leCmdAddressMid->text().trimmed() == "" && ui->leCmdAddressHigh->text().trimmed() == "") return;
+        obj.address = ui->leCmdAddressLow->text().toUInt() + (ui->leCmdAddressMid->text().toUInt() << 8) + (ui->leCmdAddressHigh->text().toUInt() << 16);
+    } else {
+        if (ui->leCmdAddress->text().trimmed() == "") return;
+        obj.address = parseIoa(ui->leCmdAddress->text());
+    }
     obj.value = 0;
   } else
     // reset process and interrogation must have value set (qrp) or (qoi)
@@ -443,13 +461,18 @@ void MainWindow::on_pbSendCommandsButton_clicked() {
       // have parameters)
       if (obj.type != iec104_class::C_CS_NA_1 &&
           obj.type != iec104_class::C_TS_TA_1) {
-        if (ui->leCmdValue->text().trimmed() == "" ||
-            ui->leCmdAddress->text().trimmed() == "")
-          return;
-        if (ui->leCmdAddress->text().toInt() == 0)
-          return;
+        if (ui->leCmdValue->text().trimmed() == "") return;
+        unsigned int parsedAddr = 0;
+        if (ui->cb888Mode->isChecked()) {
+            if (ui->leCmdAddressLow->text().trimmed() == "" && ui->leCmdAddressMid->text().trimmed() == "" && ui->leCmdAddressHigh->text().trimmed() == "") return;
+            parsedAddr = ui->leCmdAddressLow->text().toUInt() + (ui->leCmdAddressMid->text().toUInt() << 8) + (ui->leCmdAddressHigh->text().toUInt() << 16);
+        } else {
+            if (ui->leCmdAddress->text().trimmed() == "") return;
+            parsedAddr = parseIoa(ui->leCmdAddress->text());
+        }
+        if (parsedAddr == 0) return;
 
-        obj.address = ui->leCmdAddress->text().toUInt();
+        obj.address = parsedAddr;
         obj.value = ui->leCmdValue->text().toDouble();
       }
 
@@ -581,7 +604,11 @@ void MainWindow::slot_dataIndication(iec_obj *obj, unsigned numpoints) {
       pitem = nullptr;
       pitem = mapPtItem_ColAddress[std::make_pair(obj->ca, obj->address)];
       if (pitem == nullptr) {
-        sprintf(buf, "%06u", obj->address);
+        if (ui->cb888Mode->isChecked()) {
+            sprintf(buf, "%u-%u-%u", obj->address & 0xFF, (obj->address >> 8) & 0xFF, (obj->address >> 16) & 0xFF);
+        } else {
+            sprintf(buf, "%u", obj->address);
+        }
 
         // insere
         rw = ui->twPontos->rowCount();
@@ -1563,3 +1590,21 @@ void MainWindow::on_cbEnableTls_stateChanged(int arg1)
     i104.setTlsEnabled(ui->cbEnableTls->isChecked());
 }
 
+void MainWindow::on_cb888Mode_stateChanged(int arg1)
+{
+    ui->leCmdAddress->setVisible(!arg1);
+    ui->leCmdAddressLow->setVisible(arg1);
+    ui->leCmdAddressMid->setVisible(arg1);
+    ui->leCmdAddressHigh->setVisible(arg1);
+
+    for (auto const& pair : mapPtItem_ColAddress) {
+        unsigned int address = pair.first.second;
+        char buf[64];
+        if (arg1) {
+            sprintf(buf, "%u-%u-%u", address & 0xFF, (address >> 8) & 0xFF, (address >> 16) & 0xFF);
+        } else {
+            sprintf(buf, "%u", address);
+        }
+        pair.second->setText(buf);
+    }
+}
