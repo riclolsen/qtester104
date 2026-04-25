@@ -36,6 +36,7 @@
 #include <QSslSocket>
 #include <QSslError>
 #include <QString>
+#include <QVector>
 #include <QtNetwork/QTcpSocket>
 #include <iec104_class.h>
 
@@ -61,12 +62,12 @@ public:
   void setPeerVerifyMode(QSslSocket::PeerVerifyMode mode);
   
 signals:
-  void signal_dataIndication(iec_obj *obj, unsigned numpoints);
+  void signal_dataIndication(const QVector<iec_obj> &objects);
   void signal_interrogationActConfIndication();
   void signal_interrogationActTermIndication();
-  void signal_tcp_connect();
+  void signal_tcp_connect(const QString &peerAddress);
   void signal_tcp_disconnect();
-  void signal_commandActRespIndication(iec_obj *obj);
+  void signal_commandActRespIndication(const iec_obj &obj);
 
 public slots:
   void slot_tcpdisconnect(); // tcp disconnect for iec104

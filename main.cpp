@@ -28,11 +28,16 @@
  */
 
 #include <QtWidgets/QApplication>
+#include <QMetaType>
+#include <QVector>
+#include "iec104_class.h"
 #include "mainwindow.h"
 
 int main(int argc, char *argv[])
 {
     QApplication a(argc, argv);
+    qRegisterMetaType<iec_obj>("iec_obj");
+    qRegisterMetaType<QVector<iec_obj>>("QVector<iec_obj>");
     MainWindow w;
 
     w.show();

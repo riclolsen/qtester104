@@ -28,6 +28,7 @@
  */
 
 #include "logmsg.h"
+#include <QMutexLocker>
 
 using namespace std;
 
@@ -41,21 +42,25 @@ TLogMsg::TLogMsg()
 
 void TLogMsg::setMaxMsg(unsigned int maxmsg)
 {
+    QMutexLocker locker(&mMutex);
     mMaxMsg = maxmsg;
 }
 
 void TLogMsg::setLevel(unsigned int level)
 {
+    QMutexLocker locker(&mMutex);
     mLevel = level;
 }
 
 void TLogMsg::activateLog()
 {
+    QMutexLocker locker(&mMutex);
     mDoLog = true;
 }
 
 void TLogMsg::deactivateLog()
 {
+    QMutexLocker locker(&mMutex);
     mLstLog.clear(); // clean lists
     mLstTime.clear();
     mDoLog = false;
@@ -63,6 +68,7 @@ void TLogMsg::deactivateLog()
 
 void TLogMsg::doLogTime()
 {
+    QMutexLocker locker(&mMutex);
     mLstLog.clear(); // clean lists, sync
     mLstTime.clear();
     mRegTime = true;
@@ -70,22 +76,26 @@ void TLogMsg::doLogTime()
 
 void TLogMsg::dontLogTime()
 {
+    QMutexLocker locker(&mMutex);
     mRegTime = false;
 }
 
 bool TLogMsg::haveMsg()
 {
+    QMutexLocker locker(&mMutex);
     return !mLstLog.empty();
 }
 
 bool TLogMsg::isLogging()
 {
+    QMutexLocker locker(&mMutex);
     return mDoLog;
 }
 
 // coloca a mensagem na fila
 void TLogMsg::pushMsg( const char * msg, unsigned int level )
 {
+    QMutexLocker locker(&mMutex);
     if ( mDoLog && ( mLstLog.size() < mMaxMsg ) && ( mLevel <= level ) ) {
         mLstLog.push_back( msg );
         if ( mRegTime ) { // coloca hora na fila, se for o caso
@@ -96,12 +106,14 @@ void TLogMsg::pushMsg( const char * msg, unsigned int level )
 
 int TLogMsg::count()
 {
+    QMutexLocker locker(&mMutex);
     return int(mLstLog.size());
 }
 
 // Tira mensagem da fila
 string TLogMsg::pullMsg()
 {
+    QMutexLocker locker(&mMutex);
     if ( mLstLog.empty() || !mDoLog )
         return "";
 

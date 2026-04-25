@@ -34,6 +34,8 @@
 
 #include "iec104_types.h"
 #include "logmsg.h"
+#include <QMetaType>
+#include <QVector>
 #include <map>
 #include <string>
 
@@ -93,6 +95,9 @@ struct iec_obj {
 };
 
 #pragma pack(pop)
+
+Q_DECLARE_METATYPE(iec_obj)
+Q_DECLARE_METATYPE(QVector<iec_obj>)
 
 class iec104_class {
 public:

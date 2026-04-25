@@ -34,6 +34,7 @@
 
 #include <time.h>
 #include <list>
+#include <QMutex>
 #include <string>
 
 class TLogMsg
@@ -55,6 +56,7 @@ public:
 private:
     std::list <std::string> mLstLog;
     std::list <time_t> mLstTime;
+    mutable QMutex mMutex;
     unsigned int mMaxMsg;
     bool mDoLog;
     bool mRegTime;

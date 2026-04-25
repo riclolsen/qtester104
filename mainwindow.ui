@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1403</width>
+    <width>1488</width>
     <height>465</height>
    </rect>
   </property>
@@ -314,31 +314,31 @@ Use 1 or 2 for digital double</string>
      <layout class="QHBoxLayout" name="horizontalLayoutCmdAddress">
       <item>
        <widget class="QLineEdit" name="leCmdAddressLow">
-        <property name="placeholderText">
-         <string>Low</string>
-        </property>
         <property name="toolTip">
          <string>Low Octet</string>
+        </property>
+        <property name="placeholderText">
+         <string>Low</string>
         </property>
        </widget>
       </item>
       <item>
        <widget class="QLineEdit" name="leCmdAddressMid">
-        <property name="placeholderText">
-         <string>Mid</string>
-        </property>
         <property name="toolTip">
          <string>Mid Octet</string>
+        </property>
+        <property name="placeholderText">
+         <string>Mid</string>
         </property>
        </widget>
       </item>
       <item>
        <widget class="QLineEdit" name="leCmdAddressHigh">
-        <property name="placeholderText">
-         <string>High</string>
-        </property>
         <property name="toolTip">
          <string>High Octet</string>
+        </property>
+        <property name="placeholderText">
+         <string>High</string>
         </property>
        </widget>
       </item>
@@ -452,7 +452,7 @@ If empty will use remote link address.</string>
        <string>8-8-8 IOA Format</string>
       </property>
       <property name="checked">
-       <bool>true</bool>
+       <bool>false</bool>
       </property>
      </widget>
     </item>
@@ -507,7 +507,7 @@ If empty will use remote link address.</string>
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>1403</width>
+     <width>1488</width>
      <height>26</height>
     </rect>
    </property>

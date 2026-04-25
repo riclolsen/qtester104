@@ -33,8 +33,10 @@
 #include <QCloseEvent>
 #include <QDateTime>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QItemSelectionModel>
 #include <QRegularExpression>
+#include <QMetaObject>
 #include <QSslSocket> // Needed for QSslSocket::PeerVerifyMode enum
 #include <QPalette>
 #include <QStyleFactory>
@@ -56,12 +58,62 @@ static unsigned int parseIoa(const QString& str) {
     return str.toUInt();
 }
 
+void MainWindow::queueProtocolCall(const std::function<void(QIec104*)>& fn) {
+  QMetaObject::invokeMethod(
+      i104,
+      [worker = i104, fn]() { fn(worker); },
+      Qt::QueuedConnection);
+}
+
+void MainWindow::queueProtocolCommand(const iec_obj& obj) {
+  QMetaObject::invokeMethod(
+      i104,
+      [worker = i104, command = obj]() mutable { worker->sendCommand(&command); },
+      Qt::QueuedConnection);
+}
+
+void MainWindow::shutdownProtocolThread() {
+  if (ProtocolShutdown) {
+    return;
+  }
+
+  ProtocolShutdown = true;
+
+  if (i104 == nullptr) {
+    return;
+  }
+
+  QMetaObject::invokeMethod(i104, [worker = i104]() { worker->terminate(); },
+                            Qt::BlockingQueuedConnection);
+  protocolThread.quit();
+  protocolThread.wait();
+  i104->moveToThread(QApplication::instance()->thread());
+  delete i104;
+  i104 = nullptr;
+}
+
 //-------------------------------------------------------------------------------------------------------------------------
 
 MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent), ui(new Ui::MainWindow) {
+    : QMainWindow(parent),
+      ui(new Ui::MainWindow),
+      tmLogMsg(nullptr),
+      tmUiDataPump(nullptr),
+      i104(new QIec104()),
+      pendingDataPointCount(0),
+      pointTableSortPending(false),
+      pointTableResizePending(false),
+      LastCommandAddress(0),
+      SendCommands(0),
+      Hide(0),
+      PrimaryAddress(1),
+      SecondaryAddress(1),
+      ForcePrimary(0),
+      ProtocolKeepAliveActive(false),
+      ProtocolShutdown(false),
+      ProtocolPort(2404) {
   I104M_Logar = 1;
-  i104.mLog.deactivateLog();
+  i104->mLog.deactivateLog();
 
   // look for the ini file in the application dir, if not found use the conf dir
   QString ininame = QCoreApplication::applicationDirPath() + CURDIRINIFILENAME;
@@ -82,25 +134,19 @@ MainWindow::MainWindow(QWidget *parent)
   QString privateKeyPath = settings.value("RTU1/PRIVATE_KEY_PATH", "").toString();
   QString verifyPeer = settings.value("RTU1/VERIFY_PEER", "0").toString().trimmed();
 
-  i104.setTlsEnabled(useTls!="0");
-  i104.setCaCertPath(caCertPath);
-  i104.setLocalCertPath(localCertPath);
-  i104.setPrivateKeyPath(privateKeyPath);
-  i104.setPeerVerifyMode(verifyPeer!="0" ? QSslSocket::AutoVerifyPeer : QSslSocket::QueryPeer); // Adjust if using QueryPeer etc.
-
-  i104.setPrimaryAddress(settings.value("IEC104/PRIMARY_ADDRESS", 1).toInt());
-  i104.ForcePrimary = settings.value("I104M/FORCE_PRIMARY", 0).toInt();
-  i104.setSecondaryAddress(settings.value("RTU1/SECONDARY_ADDRESS", 1).toInt());
-  i104.SendCommands = settings.value("RTU1/ALLOW_COMMANDS", 0).toInt();
+  PrimaryAddress = settings.value("IEC104/PRIMARY_ADDRESS", 1).toInt();
+  ForcePrimary = settings.value("I104M/FORCE_PRIMARY", 0).toInt();
+  SecondaryAddress = settings.value("RTU1/SECONDARY_ADDRESS", 1).toInt();
+  SendCommands = settings.value("RTU1/ALLOW_COMMANDS", 0).toInt();
 
   QString IPEscravo;
-  IPEscravo = settings.value("RTU1/IP_ADDRESS_BACKUP", "").toString();
-  i104.setSecondaryIP_backup(
-      const_cast<char *>(IPEscravo.toStdString().c_str()));
+  QString IPEscravoBackup = settings.value("RTU1/IP_ADDRESS_BACKUP", "").toString();
   IPEscravo = settings.value("RTU1/IP_ADDRESS", "").toString();
-  i104.setSecondaryIP(const_cast<char *>(IPEscravo.toStdString().c_str()));
-  i104.setPortTCP(settings.value("RTU1/TCP_PORT", i104.getPortTCP()).toUInt());
-  i104.setGIPeriod(settings.value("RTU1/GI_PERIOD", 330).toUInt());
+  SecondaryIp = IPEscravo;
+  ProtocolPort = settings.value("RTU1/TCP_PORT", ProtocolPort).toUInt();
+  const unsigned giPeriod = settings.value("RTU1/GI_PERIOD", 330).toUInt();
+  const QSslSocket::PeerVerifyMode verifyMode =
+      verifyPeer != "0" ? QSslSocket::AutoVerifyPeer : QSslSocket::QueryPeer;
 
   // this is for using with the OSHMI HMI in a dual architecture
   QSettings settings_oshmi("../conf/hmi.ini", QSettings::IniFormat);
@@ -119,12 +165,12 @@ MainWindow::MainWindow(QWidget *parent)
   }
 
   if (ui->cbLog->isChecked()) {
-      i104.mLog.activateLog();
       QDate dt = QDate::currentDate();
       QString str = dt.toString() + QString(" - ") + QString(QTESTER_VERSION);
-      i104.mLog.pushMsg(str.toStdString().c_str());
+      i104->mLog.activateLog();
+      i104->mLog.pushMsg(str.toStdString().c_str());
   } else
-      i104.mLog.deactivateLog();
+      i104->mLog.deactivateLog();
 
   // this is for hiding the window when runnig
   Hide = settings_oshmi.value("RUN/HIDE", "").toInt();
@@ -148,36 +194,58 @@ MainWindow::MainWindow(QWidget *parent)
   udps->open(QIODevice::ReadWrite);
 
   QString qs;
-  QTextStream(&qs) << i104.getPortTCP();
+  QTextStream(&qs) << ProtocolPort;
   ui->lePort->setText(qs);
   ui->leIPRemoto->setText(IPEscravo);
   qs = "";
-  QTextStream(&qs) << i104.getSecondaryAddress();
+  QTextStream(&qs) << SecondaryAddress;
   ui->leLinkAddress->setText(qs);
   qs = "";
-  QTextStream(&qs) << i104.getPrimaryAddress();
+  QTextStream(&qs) << PrimaryAddress;
   ui->leMasterAddress->setText(qs);
 
   ui->leIPRemoto->setText(IPEscravo);
 
   tmLogMsg = new QTimer();
+  tmUiDataPump = new QTimer();
   tmI104M_kamsg = new QTimer();
+
+  i104->moveToThread(&protocolThread);
+  protocolThread.start();
 
   connect(udps, SIGNAL(readyRead()), this, SLOT(slot_I104M_ready_to_read()));
   connect(tmLogMsg, SIGNAL(timeout()), this, SLOT(slot_timer_logmsg()));
+  connect(tmUiDataPump, SIGNAL(timeout()), this, SLOT(slot_processPendingUiData()));
   connect(tmI104M_kamsg, SIGNAL(timeout()), this,
           SLOT(slot_timer_I104M_kamsg()));
-  connect(&i104, SIGNAL(signal_dataIndication(iec_obj *, unsigned)), this,
-          SLOT(slot_dataIndication(iec_obj *, unsigned)));
-  connect(&i104, SIGNAL(signal_interrogationActConfIndication()), this,
-          SLOT(slot_interrogationActConfIndication()));
-  connect(&i104, SIGNAL(signal_interrogationActTermIndication()), this,
-          SLOT(slot_interrogationActTermIndication()));
-  connect(&i104, SIGNAL(signal_tcp_connect()), this, SLOT(slot_tcpconnect()));
-  connect(&i104, SIGNAL(signal_tcp_disconnect()), this,
-          SLOT(slot_tcpdisconnect()));
-  connect(&i104, SIGNAL(signal_commandActRespIndication(iec_obj *)), this,
-          SLOT(slot_commandActRespIndication(iec_obj *)));
+  connect(i104, &QIec104::signal_dataIndication, this,
+          &MainWindow::slot_dataIndication);
+  connect(i104, &QIec104::signal_interrogationActConfIndication, this,
+          &MainWindow::slot_interrogationActConfIndication);
+  connect(i104, &QIec104::signal_interrogationActTermIndication, this,
+          &MainWindow::slot_interrogationActTermIndication);
+  connect(i104, &QIec104::signal_tcp_connect, this, &MainWindow::slot_tcpconnect);
+  connect(i104, &QIec104::signal_tcp_disconnect, this,
+          &MainWindow::slot_tcpdisconnect);
+  connect(i104, &QIec104::signal_commandActRespIndication, this,
+          &MainWindow::slot_commandActRespIndication);
+
+  queueProtocolCall([=](QIec104* worker) {
+    worker->setTlsEnabled(useTls != "0");
+    worker->setCaCertPath(caCertPath);
+    worker->setLocalCertPath(localCertPath);
+    worker->setPrivateKeyPath(privateKeyPath);
+    worker->setPeerVerifyMode(verifyMode);
+    worker->setPrimaryAddress(PrimaryAddress);
+    worker->ForcePrimary = ForcePrimary;
+    worker->setSecondaryAddress(SecondaryAddress);
+    worker->SendCommands = SendCommands;
+    worker->setSecondaryIP_backup(
+        const_cast<char*>(IPEscravoBackup.toStdString().c_str()));
+    worker->setSecondaryIP(const_cast<char*>(SecondaryIp.toStdString().c_str()));
+    worker->setPortTCP(ProtocolPort);
+    worker->setGIPeriod(giPeriod);
+  });
 
   ui->pbGI->setEnabled(false);
   ui->pbSendCommandsButton->setEnabled(false);
@@ -201,16 +269,16 @@ MainWindow::MainWindow(QWidget *parent)
           << "TimeTag";
   ui->twPontos->setHorizontalHeaderLabels(colunas);
 
-  tmLogMsg->start(500);
+  tmLogMsg->start(350);
 
   if (I104M_HaveDualHost()) {
     tmI104M_kamsg->start(I104M_seconds_kamsg * 1000);
     isPrimary = false;
-    i104.disable_connect();
+    queueProtocolCall([](QIec104* worker) { worker->disable_connect(); });
     ui->lbMode->setText("<font color='red'>Secondary</font>");
   } else {
     isPrimary = true;
-    i104.enable_connect();
+    queueProtocolCall([](QIec104* worker) { worker->enable_connect(); });
     ui->lbMode->setText("<font color='green'>Primary</font>");
   }
 
@@ -219,7 +287,7 @@ MainWindow::MainWindow(QWidget *parent)
 
   QFont font = QFont("Consolas");
   font.setStyleHint(QFont::Monospace);
-  font.setPointSize(9);
+  font.setPointSize(8);
   font.setFixedPitch(true);
   ui->lwLog->setFont(font);
 
@@ -230,24 +298,30 @@ MainWindow::MainWindow(QWidget *parent)
 }
 
 MainWindow::~MainWindow() {
+  shutdownProtocolThread();
   delete ui;
   delete tmLogMsg;
+  delete tmUiDataPump;
   delete tmI104M_kamsg;
 }
 
-void MainWindow::on_pbGI_clicked() { i104.solicitGI(); }
+void MainWindow::on_pbGI_clicked() {
+  queueProtocolCall([](QIec104* worker) { worker->solicitGI(); });
+}
 
 void MainWindow::on_pbConnect_clicked() {
-  if (i104.tmKeepAlive->isActive()) {
-    i104.tmKeepAlive->stop();
-    i104.tcps->close();
-    i104.slot_tcpdisconnect();
+  if (ProtocolKeepAliveActive) {
+    ProtocolKeepAliveActive = false;
+    queueProtocolCall([](QIec104* worker) {
+      worker->tmKeepAlive->stop();
+      worker->tcps->close();
+      worker->slot_tcpdisconnect();
+    });
   } else {
-    i104.setSecondaryIP(
-        const_cast<char *>(ui->leIPRemoto->text().toStdString().c_str()));
-    i104.setPortTCP(ui->lePort->text().toUInt());
-    i104.setSecondaryAddress(ui->leLinkAddress->text().toInt());
-    i104.setPrimaryAddress(ui->leMasterAddress->text().toInt());
+    SecondaryIp = ui->leIPRemoto->text();
+    ProtocolPort = ui->lePort->text().toUInt();
+    SecondaryAddress = ui->leLinkAddress->text().toInt();
+    PrimaryAddress = ui->leMasterAddress->text().toInt();
 
     /* // --- Apply TLS Settings from UI ---
     // (Assuming UI elements like ui->cbUseTls exist)
@@ -264,10 +338,18 @@ void MainWindow::on_pbConnect_clicked() {
     i104.setPeerVerifyMode(verifyPeer ? QSslSocket::VerifyPeer : QSslSocket::VerifyNone); // Adjust if using QueryPeer etc.
     */
 
-    i104.setTlsEnabled(ui->cbEnableTls->isChecked());
+    const bool tlsEnabled = ui->cbEnableTls->isChecked();
+    queueProtocolCall([=](QIec104* worker) {
+      worker->setSecondaryIP(
+          const_cast<char*>(SecondaryIp.toStdString().c_str()));
+      worker->setPortTCP(ProtocolPort);
+      worker->setSecondaryAddress(SecondaryAddress);
+      worker->setPrimaryAddress(PrimaryAddress);
+      worker->setTlsEnabled(tlsEnabled);
+    });
 
     QString qs;
-    ui->leIPRemoto->setText(i104.getSecondaryIP());
+    ui->leIPRemoto->setText(SecondaryIp);
     QTextStream(&qs) << ui->leLinkAddress->text().toInt();
     ui->leLinkAddress->setText(qs);
     qs = "";
@@ -293,7 +375,8 @@ void MainWindow::on_pbConnect_clicked() {
     ui->twPontos->clearContents();
     ui->twPontos->setRowCount(0);
     // ui->lwLog->clear();
-    i104.tmKeepAlive->start(1000);
+    ProtocolKeepAliveActive = true;
+    queueProtocolCall([](QIec104* worker) { worker->tmKeepAlive->start(1000); });
   }
 }
 
@@ -349,19 +432,19 @@ void MainWindow::slot_I104M_ready_to_read() {
       if (pmsg->endereco ==
           I104M_SPECIAL_CMD_ADDR_REQ_GI) { // request general interrogation
         I104M_Loga("R--> I104M: REQ GI");
-        i104.solicitGI();
+        queueProtocolCall([](QIec104* worker) { worker->solicitGI(); });
       } else if (pmsg->endereco == I104M_SPECIAL_CMD_ADDR_KEEP_ALIVE &&
                  (address.toString() != I104M_host_dual.toString() ||
                   address.toString() !=
                       (QString("::ffff:") + I104M_host_dual.toString())) &&
-                 i104.ForcePrimary == 0) { // keep alive
+                 ForcePrimary == 0) { // keep alive
         I104M_Loga("R--> I104M: KEEP ALIVE FROM REDUNDANT COMPUTER");
         if (isPrimary) {
           I104M_Loga("     I104M: BECOMMING SECONDARY!");
           ui->lbMode->setText("<font color='red'></font>");
         }
         isPrimary = false;
-        i104.disable_connect();
+        queueProtocolCall([](QIec104* worker) { worker->disable_connect(); });
         I104M_CntDnToBePrimary =
             I104M_CntToBePrimary; // restart count to be primary
       }
@@ -371,7 +454,7 @@ void MainWindow::slot_I104M_ready_to_read() {
       sprintf(buf, "R--> I104M: Single Command %s", pmsg->onoff ? "on" : "off");
       I104M_Loga(buf);
       obj.sp = static_cast<unsigned char>(pmsg->onoff);
-      i104.sendCommand(&obj);
+      queueProtocolCommand(obj);
       LastCommandAddress = obj.address;
       break;
     case iec104_class::C_DC_TA_1: // double command with time tag
@@ -379,7 +462,7 @@ void MainWindow::slot_I104M_ready_to_read() {
       sprintf(buf, "R--> I104M: Double Command %s", pmsg->onoff ? "on" : "off");
       I104M_Loga(buf);
       obj.dp = pmsg->onoff ? 2 : 1;
-      i104.sendCommand(&obj);
+      queueProtocolCommand(obj);
       LastCommandAddress = obj.address;
       break;
     case iec104_class::C_SE_TA_1: // set-point normalised command with time tag
@@ -388,7 +471,7 @@ void MainWindow::slot_I104M_ready_to_read() {
               double(pmsg->setpoint));
       I104M_Loga(buf);
       obj.value = pmsg->setpoint;
-      i104.sendCommand(&obj);
+      queueProtocolCommand(obj);
       LastCommandAddress = obj.address;
       break;
     case iec104_class::C_SE_TB_1: // set-point scaled command with time tag
@@ -397,7 +480,7 @@ void MainWindow::slot_I104M_ready_to_read() {
               double(pmsg->setpoint));
       I104M_Loga(buf);
       obj.value = pmsg->setpoint;
-      i104.sendCommand(&obj);
+      queueProtocolCommand(obj);
       LastCommandAddress = obj.address;
       break;
     case iec104_class::C_SE_TC_1: // set-point short floating point command with
@@ -407,7 +490,7 @@ void MainWindow::slot_I104M_ready_to_read() {
               double(pmsg->setpoint));
       I104M_Loga(buf);
       obj.value = pmsg->setpoint;
-      i104.sendCommand(&obj);
+      queueProtocolCommand(obj);
       LastCommandAddress = obj.address;
       break;
     case iec104_class::C_RC_TA_1: // regulating step command with time tag
@@ -415,7 +498,7 @@ void MainWindow::slot_I104M_ready_to_read() {
       sprintf(buf, "R--> I104M: regulating step command %s", pmsg->setpoint==0?"LOWER":"RAISE");
       I104M_Loga(buf);
       obj.rcs = pmsg->setpoint==0?1:2;
-      i104.sendCommand(&obj);
+      queueProtocolCommand(obj);
       LastCommandAddress = obj.address;
       break;
     case iec104_class::C_BO_TA_1: // bitstring command with time tag
@@ -423,7 +506,7 @@ void MainWindow::slot_I104M_ready_to_read() {
       sprintf(buf, "R--> I104M: bitstring command %u", pmsg->setpoint_i32);
       I104M_Loga(buf);
       obj.value = pmsg->setpoint_i32;
-      i104.sendCommand(&obj);
+      queueProtocolCommand(obj);
       LastCommandAddress = obj.address;
       break;
     }
@@ -477,12 +560,16 @@ void MainWindow::on_pbSendCommandsButton_clicked() {
       }
 
   obj.ca = ui->leASDUAddr->text().toUShort();
-  i104.setSecondaryASDUAddress(obj.ca);
+  queueProtocolCall([ca = obj.ca](QIec104* worker) {
+    worker->setSecondaryASDUAddress(ca);
+  });
   QDateTime current = QDateTime::currentDateTime();
 
   switch (obj.type) {
   case iec104_class::C_IC_NA_1: // Interrogation
-    i104.solicitInterrogation(ui->leCmdValue->text().toInt());
+    queueProtocolCall([group = ui->leCmdValue->text().toInt()](QIec104* worker) {
+      worker->solicitInterrogation(static_cast<char>(group));
+    });
     return;
   case iec104_class::C_SC_NA_1:
   case iec104_class::C_SC_TA_1:
@@ -579,23 +666,90 @@ void MainWindow::on_pbSendCommandsButton_clicked() {
       ui->cbCmdDuration->currentText().left(1).toUInt());
   obj.se = static_cast<unsigned char>(ui->cbSBO->isChecked());
 
-  i104.sendCommand(&obj);
+  queueProtocolCommand(obj);
   LastCommandAddress = obj.address;
 }
 
 void MainWindow::I104M_Loga(QString str, int id) {
   if (I104M_Logar && id == 0) {
-    i104.mLog.pushMsg(const_cast<char *>(str.toStdString().c_str()), 0);
+    i104->mLog.pushMsg(const_cast<char *>(str.toStdString().c_str()), 0);
   }
 }
 
-void MainWindow::slot_dataIndication(iec_obj *obj, unsigned numpoints) {
+void MainWindow::slot_dataIndication(const QVector<iec_obj>& objects) {
+  if (objects.isEmpty()) {
+    return;
+  }
+
+  pendingDataPointCount += objects.size();
+  pendingDataIndications.enqueue(objects);
+
+  if (!tmUiDataPump->isActive()) {
+    tmUiDataPump->start(0);
+  }
+}
+
+void MainWindow::slot_processPendingUiData() {
+  if (pendingDataIndications.isEmpty()) {
+    tmUiDataPump->stop();
+    return;
+  }
+
+  const qsizetype maxPointsPerTick =
+      pendingDataPointCount > 20000 ? 12000 : 4000;
+  const qint64 maxMillisPerTick =
+      pendingDataPointCount > 20000 ? 30 : 20;
+
+  qsizetype pointsProcessed = 0;
+  QElapsedTimer elapsed;
+  elapsed.start();
+
+  const bool updatePointMap = ui->cbPointMap->isChecked();
+  if (updatePointMap) {
+    ui->twPontos->setUpdatesEnabled(false);
+  }
+
+  while (!pendingDataIndications.isEmpty()) {
+    const QVector<iec_obj> objects = pendingDataIndications.dequeue();
+    pendingDataPointCount -= objects.size();
+    processDataIndicationBatch(objects);
+    pointsProcessed += objects.size();
+
+    if (pointsProcessed >= maxPointsPerTick || elapsed.elapsed() >= maxMillisPerTick) {
+      break;
+    }
+  }
+
+  if (updatePointMap) {
+    ui->twPontos->setUpdatesEnabled(true);
+    ui->twPontos->viewport()->update();
+  }
+
+  if (pointTableSortPending && pendingDataIndications.isEmpty()) {
+    ui->twPontos->sortItems(0);
+    pointTableSortPending = false;
+  }
+
+  if (pendingDataIndications.isEmpty()) {
+    tmUiDataPump->stop();
+  } else {
+    tmUiDataPump->start(0);
+  }
+}
+
+void MainWindow::processDataIndicationBatch(const QVector<iec_obj>& objects) {
   char buf[1500];
   char buftt[1500];
   int rw = -1;
   bool inserted = false;
   QTableWidgetItem *pitem;
   static const char *dblmsg[] = {"tra ", "off ", "on ", "ind "};
+  const iec_obj* obj = objects.constData();
+  const unsigned numpoints = static_cast<unsigned>(objects.size());
+
+  if (numpoints == 0) {
+    return;
+  }
 
   I104M_processPoints(obj, numpoints);
 
@@ -669,9 +823,9 @@ void MainWindow::slot_dataIndication(iec_obj *obj, unsigned numpoints) {
       sprintf(buf, "%u", obj->ca);
       mapPtItem_ColCommonAddress[std::make_pair(obj->ca, obj->address)]
           ->setText(buf);
-      sprintf(buf, "%d:%s", obj->type, i104.asduTiStr(obj->type).c_str());
+      sprintf(buf, "%d:%s", obj->type, i104->asduTiStr(obj->type).c_str());
       mapPtItem_ColType[std::make_pair(obj->ca, obj->address)]->setText(buf);
-      sprintf(buf, "%d:%s", obj->cause, i104.causeStr(obj->cause).c_str());
+      sprintf(buf, "%d:%s", obj->cause, i104->causeStr(obj->cause).c_str());
       mapPtItem_ColCause[std::make_pair(obj->ca, obj->address)]->setText(buf);
       sprintf(buf, "%d",
               1 + mapPtItem_ColCount[std::make_pair(obj->ca, obj->address)]
@@ -801,15 +955,17 @@ void MainWindow::slot_dataIndication(iec_obj *obj, unsigned numpoints) {
           buftt);
     }
 
-    if (inserted)
-      ui->twPontos->sortItems(0);
+    if (inserted) {
+      pointTableSortPending = true;
+      pointTableResizePending = true;
+    }
   }
 }
 
 void MainWindow::slot_timer_logmsg() {
   static int count = 0;
-  static int rowant = 0;
-  static const int logBufSize = 30000;
+  static const int logBufSize = 20000;
+  static const int maxLogMsgsPerTick = 250;
   static int cntLogMsgs = 0; // index for circular buffer of log messages
 
   if (Hide)
@@ -817,31 +973,24 @@ void MainWindow::slot_timer_logmsg() {
       this->setVisible(false);
 
   // adjust size of rows and columns
-  if (!(++count % 15))
-    if (rowant < ui->twPontos->rowCount()) {
-      rowant = ui->twPontos->rowCount();
+  if (!(++count % 50))
+    if (pointTableResizePending && pendingDataIndications.isEmpty()) {
       ui->twPontos->resizeRowsToContents();
       ui->twPontos->resizeColumnsToContents();
+      pointTableResizePending = false;
     }
 
-  // if ( !i104.mLog.haveMsg() && i104.tmKeepAlive->isActive() )
-  //  i104.mLog.pushMsg( "." );
-
-  if (i104.mLog.haveMsg()) {
-    // if (ui->lwLog->count() > logBufSize )
-    //{
-    //     ui->lwLog->clear();
-    //     ui->lwLog->addItem( "*** Message list auto cleaned!" );
-    // }
-
-    while (i104.mLog.haveMsg()) {
+  if (i104->mLog.haveMsg()) {
+    int logMsgsProcessed = 0;
+    ui->lwLog->setUpdatesEnabled(false);
+    while (i104->mLog.haveMsg() && logMsgsProcessed < maxLogMsgsPerTick) {
       if (ui->lwLog->count() < logBufSize) {
         // buffer not filled: create new lines
-        ui->lwLog->addItem(i104.mLog.pullMsg().c_str());
+        ui->lwLog->addItem(i104->mLog.pullMsg().c_str());
       } else {
         // buffer filled: rewrite lines
         ui->lwLog->item(cntLogMsgs % logBufSize)
-            ->setText(i104.mLog.pullMsg().c_str());
+            ->setText(i104->mLog.pullMsg().c_str());
         // Marks end of circular buffer
         ui->lwLog->item((cntLogMsgs + 1) % logBufSize)
             ->setText("=================================================");
@@ -873,12 +1022,14 @@ void MainWindow::slot_timer_logmsg() {
             ->setBackground(Qt::transparent);
       }
       cntLogMsgs++;
+      logMsgsProcessed++;
     }
 
     if (ui->cbAutoScroll->isChecked()) {
       ui->lwLog->scrollToItem(ui->lwLog->item((cntLogMsgs - 1) % logBufSize),
                               QAbstractItemView::PositionAtBottom);
     }
+    ui->lwLog->setUpdatesEnabled(true);
   }
 }
 
@@ -886,8 +1037,8 @@ void MainWindow::slot_interrogationActConfIndication() {}
 
 void MainWindow::slot_interrogationActTermIndication() {}
 
-void MainWindow::slot_tcpconnect() {
-  ui->leIPRemoto->setText(i104.tcps->peerAddress().toString());
+void MainWindow::slot_tcpconnect(const QString& peerAddress) {
+  ui->leIPRemoto->setText(peerAddress);
   ui->lbStatus->setText("<font color='green'> TCP CONNECTED!</font>");
   ui->pbGI->setEnabled(true);
   ui->pbSendCommandsButton->setEnabled(true);
@@ -900,7 +1051,7 @@ void MainWindow::slot_tcpdisconnect() {
         I104M_CntToBePrimary + 1; // wait a little more time to be primary again
                                   // to allow for the secondary to assume
     isPrimary = false;
-    i104.disable_connect();
+    queueProtocolCall([](QIec104* worker) { worker->disable_connect(); });
     I104M_Loga(" --- I104M: BECOMING SECONDARY BY DISCONNECTION");
     ui->lbMode->setText("<font color='red'>Secondary</font>");
   }
@@ -909,7 +1060,7 @@ void MainWindow::slot_tcpdisconnect() {
   ui->pbGI->setEnabled(false);
   ui->pbSendCommandsButton->setEnabled(false);
 
-  if (i104.tmKeepAlive->isActive()) {
+  if (ProtocolKeepAliveActive) {
     ui->pbConnect->setText("Give up");
     ui->lePort->setEnabled(false);
     ui->leIPRemoto->setEnabled(false);
@@ -924,7 +1075,7 @@ void MainWindow::slot_tcpdisconnect() {
   }
 }
 
-void MainWindow::slot_commandActRespIndication(iec_obj *obj) {
+void MainWindow::slot_commandActRespIndication(const iec_obj& obj) {
 
   char buf[1000];
   char buftt[1000];
@@ -940,14 +1091,14 @@ void MainWindow::slot_commandActRespIndication(iec_obj *obj) {
                                  "lli ", "hli ", "res "};
   // static const char* qpamsg[] = { "unu ", "gen ", "obj ", "trm ", "res " };
 
-  if (obj->address == 0)
+  if (obj.address == 0)
     return;
 
   if (ui->cbPointMap->isChecked()) {
     pitem = nullptr;
-    pitem = mapPtItem_ColAddress[std::make_pair(obj->ca, obj->address)];
+    pitem = mapPtItem_ColAddress[std::make_pair(obj.ca, obj.address)];
     if (pitem == nullptr) {
-      sprintf(buf, "%06u", obj->address);
+      sprintf(buf, "%06u", obj.address);
 
       // insere
       rw = ui->twPontos->rowCount();
@@ -956,211 +1107,212 @@ void MainWindow::slot_commandActRespIndication(iec_obj *obj) {
       newItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
       ui->twPontos->setItem(rw, 0, newItem);
       newItem->setFlags(Qt::ItemIsSelectable);
-      mapPtItem_ColAddress[std::make_pair(obj->ca, obj->address)] = newItem;
+      mapPtItem_ColAddress[std::make_pair(obj.ca, obj.address)] = newItem;
 
       newItem = new QTableWidgetItem();
       newItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
       ui->twPontos->setItem(rw, 1, newItem);
       newItem->setFlags(Qt::ItemIsSelectable);
-      mapPtItem_ColCommonAddress[std::make_pair(obj->ca, obj->address)] =
+      mapPtItem_ColCommonAddress[std::make_pair(obj.ca, obj.address)] =
           newItem;
 
       newItem = new QTableWidgetItem();
       newItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
       ui->twPontos->setItem(rw, 2, newItem);
       newItem->setFlags(Qt::ItemIsSelectable);
-      mapPtItem_ColValue[std::make_pair(obj->ca, obj->address)] = newItem;
+      mapPtItem_ColValue[std::make_pair(obj.ca, obj.address)] = newItem;
 
       newItem = new QTableWidgetItem();
       newItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
       ui->twPontos->setItem(rw, 3, newItem);
       newItem->setFlags(Qt::ItemIsSelectable);
-      mapPtItem_ColType[std::make_pair(obj->ca, obj->address)] = newItem;
+      mapPtItem_ColType[std::make_pair(obj.ca, obj.address)] = newItem;
 
       newItem = new QTableWidgetItem();
       newItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
       ui->twPontos->setItem(rw, 4, newItem);
       newItem->setFlags(Qt::ItemIsSelectable);
-      mapPtItem_ColCause[std::make_pair(obj->ca, obj->address)] = newItem;
+      mapPtItem_ColCause[std::make_pair(obj.ca, obj.address)] = newItem;
 
       newItem = new QTableWidgetItem();
       newItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
       ui->twPontos->setItem(rw, 5, newItem);
       newItem->setFlags(Qt::ItemIsSelectable);
-      mapPtItem_ColFlags[std::make_pair(obj->ca, obj->address)] = newItem;
+      mapPtItem_ColFlags[std::make_pair(obj.ca, obj.address)] = newItem;
 
       newItem = new QTableWidgetItem("0");
       newItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
       ui->twPontos->setItem(rw, 6, newItem);
       newItem->setFlags(Qt::ItemIsSelectable);
-      mapPtItem_ColCount[std::make_pair(obj->ca, obj->address)] = newItem;
+      mapPtItem_ColCount[std::make_pair(obj.ca, obj.address)] = newItem;
 
       newItem = new QTableWidgetItem();
       ui->twPontos->setItem(rw, 7, newItem);
       newItem->setFlags(Qt::ItemIsSelectable);
-      mapPtItem_ColTimeTag[std::make_pair(obj->ca, obj->address)] = newItem;
+      mapPtItem_ColTimeTag[std::make_pair(obj.ca, obj.address)] = newItem;
     }
 
-    sprintf(buf, "%9.3f", double(obj->value));
-    mapPtItem_ColValue[std::make_pair(obj->ca, obj->address)]->setText(buf);
-    sprintf(buf, "%u", obj->ca);
-    mapPtItem_ColCommonAddress[std::make_pair(obj->ca, obj->address)]->setText(
+    sprintf(buf, "%9.3f", double(obj.value));
+    mapPtItem_ColValue[std::make_pair(obj.ca, obj.address)]->setText(buf);
+    sprintf(buf, "%u", obj.ca);
+    mapPtItem_ColCommonAddress[std::make_pair(obj.ca, obj.address)]->setText(
         buf);
-    sprintf(buf, "%d", obj->type);
-    mapPtItem_ColType[std::make_pair(obj->ca, obj->address)]->setText(buf);
-    sprintf(buf, "%d", obj->cause);
-    mapPtItem_ColCause[std::make_pair(obj->ca, obj->address)]->setText(buf);
+    sprintf(buf, "%d", obj.type);
+    mapPtItem_ColType[std::make_pair(obj.ca, obj.address)]->setText(buf);
+    sprintf(buf, "%d", obj.cause);
+    mapPtItem_ColCause[std::make_pair(obj.ca, obj.address)]->setText(buf);
     sprintf(buf, "%d",
-            1 + mapPtItem_ColCount[std::make_pair(obj->ca, obj->address)]
+            1 + mapPtItem_ColCount[std::make_pair(obj.ca, obj.address)]
                     ->text()
                     .toInt());
-    mapPtItem_ColCount[std::make_pair(obj->ca, obj->address)]->setText(buf);
+    mapPtItem_ColCount[std::make_pair(obj.ca, obj.address)]->setText(buf);
 
     QDateTime current = QDateTime::currentDateTime();
     sprintf(buftt, "Local: %s",
             current.toString("yyyy/MM/dd hh:mm:ss.zzz").toStdString().c_str());
-    switch (obj->type) {
+    switch (obj.type) {
     case iec104_class::C_SC_TA_1:
-      fmtCP56Time(buftt, &obj->timetag);
+      fmtCP56Time(buftt, &obj.timetag);
       [[fallthrough]];
     case iec104_class::C_SC_NA_1:
-      sprintf(buf, "%d", int(obj->scs));
-      mapPtItem_ColValue[std::make_pair(obj->ca, obj->address)]->setText(buf);
-      sprintf(buf, "%s%s%s%s", pnmsg[obj->pn], sglmsg[obj->scs],
-              selmsg[obj->se], qumsg[obj->qu]);
+      sprintf(buf, "%d", int(obj.scs));
+      mapPtItem_ColValue[std::make_pair(obj.ca, obj.address)]->setText(buf);
+      sprintf(buf, "%s%s%s%s", pnmsg[obj.pn], sglmsg[obj.scs],
+              selmsg[obj.se], qumsg[obj.qu]);
       break;
     case iec104_class::C_DC_TA_1:
-      fmtCP56Time(buftt, &obj->timetag);
+      fmtCP56Time(buftt, &obj.timetag);
       [[fallthrough]];
     case iec104_class::C_DC_NA_1:
-      sprintf(buf, "%d", int(obj->dcs));
-      mapPtItem_ColValue[std::make_pair(obj->ca, obj->address)]->setText(buf);
-      sprintf(buf, "%s%s%s%s", pnmsg[obj->pn], dblmsg[obj->dcs],
-              selmsg[obj->se], qumsg[obj->qu]);
+      sprintf(buf, "%d", int(obj.dcs));
+      mapPtItem_ColValue[std::make_pair(obj.ca, obj.address)]->setText(buf);
+      sprintf(buf, "%s%s%s%s", pnmsg[obj.pn], dblmsg[obj.dcs],
+              selmsg[obj.se], qumsg[obj.qu]);
       break;
     case iec104_class::C_RC_TA_1:
-      fmtCP56Time(buftt, &obj->timetag);
+      fmtCP56Time(buftt, &obj.timetag);
       [[fallthrough]];
     case iec104_class::C_RC_NA_1:
-      sprintf(buf, "%d", int(obj->rcs));
-      mapPtItem_ColValue[std::make_pair(obj->ca, obj->address)]->setText(buf);
-      sprintf(buf, "%s%s%s", pnmsg[obj->pn], rcsmsg[obj->rcs], selmsg[obj->se]);
+      sprintf(buf, "%d", int(obj.rcs));
+      mapPtItem_ColValue[std::make_pair(obj.ca, obj.address)]->setText(buf);
+      sprintf(buf, "%s%s%s", pnmsg[obj.pn], rcsmsg[obj.rcs], selmsg[obj.se]);
       break;
     case iec104_class::C_SE_TA_1:
-      fmtCP56Time(buftt, &obj->timetag);
+      fmtCP56Time(buftt, &obj.timetag);
       [[fallthrough]];
     case iec104_class::C_SE_NA_1:
-      sprintf(buf, "%s%s", pnmsg[obj->pn], selmsg[obj->se]);
+      sprintf(buf, "%s%s", pnmsg[obj.pn], selmsg[obj.se]);
       break;
     case iec104_class::C_SE_TB_1:
-      fmtCP56Time(buftt, &obj->timetag);
+      fmtCP56Time(buftt, &obj.timetag);
       [[fallthrough]];
     case iec104_class::C_SE_NB_1:
-      sprintf(buf, "%s%s", pnmsg[obj->pn], selmsg[obj->se]);
+      sprintf(buf, "%s%s", pnmsg[obj.pn], selmsg[obj.se]);
       break;
     case iec104_class::C_SE_TC_1:
-      fmtCP56Time(buftt, &obj->timetag);
+      fmtCP56Time(buftt, &obj.timetag);
       [[fallthrough]];
     case iec104_class::C_SE_NC_1:
-      sprintf(buf, "%s%s", pnmsg[obj->pn], selmsg[obj->se]);
+      sprintf(buf, "%s%s", pnmsg[obj.pn], selmsg[obj.se]);
       break;
     case iec104_class::C_BO_TA_1:
-      fmtCP56Time(buftt, &obj->timetag);
+      fmtCP56Time(buftt, &obj.timetag);
       [[fallthrough]];
     case iec104_class::C_BO_NA_1:
-      sprintf(buf, "%s", pnmsg[obj->pn]);
+      sprintf(buf, "%s", pnmsg[obj.pn]);
       break;
     case iec104_class::P_ME_NA_1:
       [[fallthrough]];
     case iec104_class::P_ME_NB_1:
       [[fallthrough]];
     case iec104_class::P_ME_NC_1:
-      sprintf(buf, "%s%s%s%s", pnmsg[obj->pn], kpamsg[obj->kpa],
-              obj->lpc ? "lpc " : "", obj->pop ? "pop " : "");
+      sprintf(buf, "%s%s%s%s", pnmsg[obj.pn], kpamsg[obj.kpa],
+              obj.lpc ? "lpc " : "", obj.pop ? "pop " : "");
       break;
     case iec104_class::P_AC_NA_1:
-      sprintf(buf, "%s%s", pnmsg[obj->pn], kpamsg[obj->qpa]);
+      sprintf(buf, "%s%s", pnmsg[obj.pn], kpamsg[obj.qpa]);
       break;
     }
 
-    mapPtItem_ColFlags[std::make_pair(obj->ca, obj->address)]->setText(buf);
-    mapPtItem_ColTimeTag[std::make_pair(obj->ca, obj->address)]->setText(buftt);
+    mapPtItem_ColFlags[std::make_pair(obj.ca, obj.address)]->setText(buf);
+    mapPtItem_ColTimeTag[std::make_pair(obj.ca, obj.address)]->setText(buftt);
   }
 
   bool is_select = false;
 
-  if (obj->cause == iec104_class::REQUEST ||
-      obj->cause == iec104_class::ACTIVATION ||
-      obj->cause == iec104_class::ACTCONFIRM)
-    if (LastCommandAddress == obj->address) {
-      i104.mLog.pushMsg("     COMMAND CONF INDICATION");
-      is_select = (obj->se == iec104_class::SELECT);
+  if (obj.cause == iec104_class::REQUEST ||
+      obj.cause == iec104_class::ACTIVATION ||
+      obj.cause == iec104_class::ACTCONFIRM)
+    if (LastCommandAddress == obj.address) {
+      i104->mLog.pushMsg("     COMMAND CONF INDICATION");
+      is_select = (obj.se == iec104_class::SELECT);
 
       // if confirmed select, execute
-      if (is_select && obj->pn == iec104_class::POSITIVE) {
+      if (is_select && obj.pn == iec104_class::POSITIVE) {
         // if defined ASDU address on UI, use it
         // else will set to zero and use slave address (send Command will
         // substitute zero to slave address)
-        obj->ca = ui->leASDUAddr->text().toUShort();
-        obj->se = iec104_class::EXECUTE;
-        i104.sendCommand(obj);
+        iec_obj executeObj = obj;
+        executeObj.ca = ui->leASDUAddr->text().toUShort();
+        executeObj.se = iec104_class::EXECUTE;
+        queueProtocolCommand(executeObj);
       }
 
       // respond to I104M only if it's not a select or if its a negative
       // response
-      if (is_select == false || obj->pn == iec104_class::NEGATIVE) {
+      if (is_select == false || obj.pn == iec104_class::NEGATIVE) {
         t_msgsup I104M_msg;
         I104M_msg.signature = MSGSUP_SIG;
-        I104M_msg.tipo = obj->type;
-        I104M_msg.endereco = obj->address;
-        I104M_msg.sec = obj->ca;
-        I104M_msg.prim = unsigned(i104.getPrimaryAddress());
+        I104M_msg.tipo = obj.type;
+        I104M_msg.endereco = obj.address;
+        I104M_msg.sec = obj.ca;
+        I104M_msg.prim = unsigned(PrimaryAddress);
         // mask cause, and p/n result to bit 6 1=NEG 0=POS
         I104M_msg.causa = unsigned(
-            obj->cause | (((obj->pn == iec104_class::NEGATIVE) ? 1 : 0) << 6));
+            obj.cause | (((obj.pn == iec104_class::NEGATIVE) ? 1 : 0) << 6));
 
-        switch (obj->type) {
+        switch (obj.type) {
         case iec104_class::C_SC_NA_1:
         case iec104_class::C_SC_TA_1:
           I104M_msg.taminfo = 1;
-          I104M_msg.info[0] = obj->scs;
+          I104M_msg.info[0] = obj.scs;
           break;
         case iec104_class::C_DC_NA_1:
         case iec104_class::C_DC_TA_1:
           I104M_msg.taminfo = 1;
-          I104M_msg.info[0] = obj->dcs;
+          I104M_msg.info[0] = obj.dcs;
           break;
         case iec104_class::C_RC_NA_1:
         case iec104_class::C_RC_TA_1:
           I104M_msg.taminfo = 1;
-          I104M_msg.info[0] = obj->rcs;
+          I104M_msg.info[0] = obj.rcs;
           break;
         case iec104_class::C_SE_NA_1:
         case iec104_class::C_SE_TA_1:
           I104M_msg.taminfo = 4;
-          *(reinterpret_cast<float *>(&I104M_msg.info)) = obj->value;
+          *(reinterpret_cast<float *>(&I104M_msg.info)) = obj.value;
           break;
 
         case iec104_class::C_SE_NB_1:
         case iec104_class::C_SE_TB_1:
           I104M_msg.taminfo = 4;
-          *(reinterpret_cast<float *>(&I104M_msg.info)) = obj->value;
+          *(reinterpret_cast<float *>(&I104M_msg.info)) = obj.value;
           break;
 
         case iec104_class::C_SE_NC_1:
         case iec104_class::C_SE_TC_1:
           I104M_msg.taminfo = 4;
-          *(reinterpret_cast<float *>(&I104M_msg.info)) = obj->value;
+          *(reinterpret_cast<float *>(&I104M_msg.info)) = obj.value;
           break;
 
         case iec104_class::C_BO_NA_1:
         case iec104_class::C_BO_TA_1:
           I104M_msg.taminfo = 4;
           *(reinterpret_cast<uint32_t *>(&I104M_msg.info)) =
-              uint32_t(obj->value);
+              uint32_t(obj.value);
           break;
         }
-        if (obj->pn == iec104_class::NEGATIVE) {
+        if (obj.pn == iec104_class::NEGATIVE) {
           I104M_Loga("T<-- I104M: COMMAND REJECTED BY IEC104 SLAVE");
         } else {
           I104M_Loga("T<-- I104M: COMMAND ACCEPTED BY IEC104 SLAVE");
@@ -1175,7 +1327,7 @@ void MainWindow::slot_commandActRespIndication(iec_obj *obj) {
 }
 
 void MainWindow::closeEvent(QCloseEvent *event) {
-  i104.terminate();
+  shutdownProtocolThread();
   event->accept();
 }
 
@@ -1183,8 +1335,10 @@ void MainWindow::slot_timer_I104M_kamsg() {
   if (!isPrimary) {
     if (I104M_CntDnToBePrimary <= 0) {
       isPrimary = true;
-      i104.enable_connect();
-      i104.tmKeepAlive->start();
+      queueProtocolCall([](QIec104* worker) {
+        worker->enable_connect();
+        worker->tmKeepAlive->start();
+      });
       I104M_CntDnToBePrimary = I104M_CntToBePrimary;
       I104M_Loga(" --- I104M: BECOMING PRIMARY BY TIMEOUT");
       ui->lbMode->setText("<font color='green'>Primary</font>");
@@ -1209,12 +1363,12 @@ void MainWindow::slot_timer_I104M_kamsg() {
 
 void MainWindow::on_cbLog_clicked() {
   if (ui->cbLog->isChecked()) {
-    i104.mLog.activateLog();
+    i104->mLog.activateLog();
     QDate dt = QDate::currentDate();
     QString str = dt.toString() + QString(" - ") + QString(QTESTER_VERSION);
-    i104.mLog.pushMsg(str.toStdString().c_str());
+    i104->mLog.pushMsg(str.toStdString().c_str());
   } else
-    i104.mLog.deactivateLog();
+    i104->mLog.deactivateLog();
 }
 
 void MainWindow::on_pbCopyClipb_clicked() {
@@ -1239,14 +1393,14 @@ void MainWindow::on_pbCopyVals_clicked() {
   QApplication::clipboard()->setText(text);
 }
 
-void MainWindow::I104M_processPoints(iec_obj *obj, unsigned numpoints) {
+void MainWindow::I104M_processPoints(const iec_obj *obj, unsigned numpoints) {
   t_msgsupsq msg;
 
   switch (obj->type) {
   case iec104_class::M_DP_TB_1: { // double state with time tag
     msg.signature = MSGSUPSQ_SIG;
     msg.tipo = obj->type;
-    msg.prim = static_cast<uint32_t>(i104.getPrimaryAddress());
+    msg.prim = static_cast<uint32_t>(PrimaryAddress);
     msg.sec = obj->ca;
     msg.causa = obj->cause;
     msg.taminfo = sizeof(digital_w_time7_seq);
@@ -1279,7 +1433,7 @@ void MainWindow::I104M_processPoints(iec_obj *obj, unsigned numpoints) {
   case iec104_class::M_SP_TB_1: { // single state with time tag
     msg.signature = MSGSUPSQ_SIG;
     msg.tipo = obj->type;
-    msg.prim = static_cast<uint32_t>(i104.getPrimaryAddress());
+    msg.prim = static_cast<uint32_t>(PrimaryAddress);
     msg.sec = obj->ca;
     msg.causa = obj->cause;
     msg.taminfo = sizeof(digital_w_time7_seq);
@@ -1312,7 +1466,7 @@ void MainWindow::I104M_processPoints(iec_obj *obj, unsigned numpoints) {
   case iec104_class::M_DP_NA_1: { // double state without time tag
     msg.signature = MSGSUPSQ_SIG;
     msg.tipo = obj->type;
-    msg.prim = static_cast<uint32_t>(i104.getPrimaryAddress());
+    msg.prim = static_cast<uint32_t>(PrimaryAddress);
     msg.sec = obj->ca;
     msg.causa = obj->cause;
     msg.taminfo = sizeof(digital_notime_seq);
@@ -1339,7 +1493,7 @@ void MainWindow::I104M_processPoints(iec_obj *obj, unsigned numpoints) {
   case iec104_class::M_SP_NA_1: { // single state without time tag
     msg.signature = MSGSUPSQ_SIG;
     msg.tipo = obj->type;
-    msg.prim = static_cast<uint32_t>(i104.getPrimaryAddress());
+    msg.prim = static_cast<uint32_t>(PrimaryAddress);
     msg.sec = obj->ca;
     msg.causa = obj->cause;
     msg.taminfo = sizeof(digital_notime_seq);
@@ -1368,7 +1522,7 @@ void MainWindow::I104M_processPoints(iec_obj *obj, unsigned numpoints) {
   case iec104_class::M_ST_NA_1: { // 5 = step without time tag
     msg.signature = MSGSUPSQ_SIG;
     msg.tipo = iec104_class::M_ST_NA_1;
-    msg.prim = static_cast<uint32_t>(i104.getPrimaryAddress());
+    msg.prim = static_cast<uint32_t>(PrimaryAddress);
     msg.sec = obj->ca;
     msg.causa = obj->cause;
     msg.taminfo = sizeof(step_seq);
@@ -1397,7 +1551,7 @@ void MainWindow::I104M_processPoints(iec_obj *obj, unsigned numpoints) {
   case iec104_class::M_ME_NA_1: { // 9 = normalized without time tag
     msg.signature = MSGSUPSQ_SIG;
     msg.tipo = iec104_class::M_ME_NA_1;
-    msg.prim = static_cast<uint32_t>(i104.getPrimaryAddress());
+    msg.prim = static_cast<uint32_t>(PrimaryAddress);
     msg.sec = obj->ca;
     msg.causa = obj->cause;
     msg.taminfo = sizeof(analogico_seq);
@@ -1425,7 +1579,7 @@ void MainWindow::I104M_processPoints(iec_obj *obj, unsigned numpoints) {
   case iec104_class::M_ME_NB_1: { // 11 = scaled without time tag
     msg.signature = MSGSUPSQ_SIG;
     msg.tipo = iec104_class::M_ME_NB_1;
-    msg.prim = static_cast<uint32_t>(i104.getPrimaryAddress());
+    msg.prim = static_cast<uint32_t>(PrimaryAddress);
     msg.sec = obj->ca;
     msg.causa = obj->cause;
     msg.taminfo = sizeof(analogico_seq);
@@ -1453,7 +1607,7 @@ void MainWindow::I104M_processPoints(iec_obj *obj, unsigned numpoints) {
   case iec104_class::M_ME_NC_1: { // 13 = float without time tag
     msg.signature = MSGSUPSQ_SIG;
     msg.tipo = iec104_class::M_ME_NC_1;
-    msg.prim = static_cast<uint32_t>(i104.getPrimaryAddress());
+    msg.prim = static_cast<uint32_t>(PrimaryAddress);
     msg.sec = obj->ca;
     msg.causa = obj->cause;
     msg.taminfo = sizeof(flutuante_seq);
@@ -1481,7 +1635,7 @@ void MainWindow::I104M_processPoints(iec_obj *obj, unsigned numpoints) {
   case iec104_class::M_IT_NA_1: { // 15 = integrated totals without time tag
     msg.signature = MSGSUPSQ_SIG;
     msg.tipo = iec104_class::M_IT_NA_1;
-    msg.prim = static_cast<uint32_t>(i104.getPrimaryAddress());
+    msg.prim = static_cast<uint32_t>(PrimaryAddress);
     msg.sec = obj->ca;
     msg.causa = obj->cause;
     msg.taminfo = sizeof(integrated_seq);
@@ -1513,7 +1667,7 @@ void MainWindow::I104M_processPoints(iec_obj *obj, unsigned numpoints) {
     // conflict for bitstrings in sequence of addresses
     msg.signature = MSGSUPSQ_SIG;
     msg.tipo = iec104_class::M_IT_NA_1;
-    msg.prim = static_cast<uint32_t>(i104.getPrimaryAddress());
+    msg.prim = static_cast<uint32_t>(PrimaryAddress);
     msg.sec = obj->ca;
     msg.causa = obj->cause;
     msg.taminfo = sizeof(integrated_seq);
@@ -1535,7 +1689,7 @@ void MainWindow::I104M_processPoints(iec_obj *obj, unsigned numpoints) {
                   msg.numpoints * (sizeof(int32_t) + sizeof(integrated_seq)));
   } break;
   default:
-    i104.mLog.pushMsg(
+    i104->mLog.pushMsg(
         "R--> IEC104 UNSUPPORTED TYPE, NOT FORWARDED TO I104M/OSHMI");
     break;
   }
@@ -1549,7 +1703,7 @@ void MainWindow::SendOSHMI(char *msg, uint32_t packet_size) {
                         I104M_host_dual, I104M_porta);
 }
 
-void MainWindow::fmtCP56Time(char *buf, cp56time2a *timetag) {
+void MainWindow::fmtCP56Time(char *buf, const cp56time2a *timetag) {
   if (timetag->month == 0 || timetag->mday == 0)
     return;
   sprintf(buf, "Field: %02d/%02d/%02d %02d:%02d:%02d.%03d %s %s", timetag->year,
@@ -1587,7 +1741,10 @@ void MainWindow::on_cbTheme_currentIndexChanged(int index) {
 
 void MainWindow::on_cbEnableTls_stateChanged(int arg1)
 {
-    i104.setTlsEnabled(ui->cbEnableTls->isChecked());
+    Q_UNUSED(arg1);
+    queueProtocolCall([enabled = ui->cbEnableTls->isChecked()](QIec104* worker) {
+        worker->setTlsEnabled(enabled);
+    });
 }
 
 void MainWindow::on_cb888Mode_stateChanged(int arg1)

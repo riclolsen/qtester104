@@ -35,14 +35,17 @@
 #include <QtWidgets/QLineEdit>
 #include <QtWidgets/QTextBrowser>
 #include <QtWidgets/QPushButton>
+#include <QQueue>
+#include <QThread>
 #include <QTimer>
 #include <QSettings>
 #include <QtWidgets/QTableWidgetItem>
+#include <functional>
 #include <map>
 #include "iec104_class.h"
 #include "qiec104.h"
 
-#define QTESTER_VERSION "v2.7.4"
+#define QTESTER_VERSION "v2.7.5"
 #define QTESTER_COPYRIGHT "Copyright © 2010-2026 Ricardo Lastra Olsen"
 #define CURDIRINIFILENAME "/qtester104.ini"
 #define CONFDIRINIFILENAME "../conf/qtester104.ini"
@@ -68,13 +71,14 @@ class MainWindow : public QMainWindow {
   void on_pbGI_clicked(); // GI button pressed
   void slot_timer_logmsg(); // timer for log messages
   void slot_timer_I104M_kamsg(); // timer for sending keepalive I104M messages
+  void slot_processPendingUiData();
   void slot_I104M_ready_to_read();  // I104M: slot to read data from OSHMI UDP
-  void slot_dataIndication(iec_obj* obj, unsigned numpoints);
+  void slot_dataIndication(const QVector<iec_obj>& objects);
   void slot_interrogationActConfIndication();
   void slot_interrogationActTermIndication();
-  void slot_tcpconnect();         // tcp connect for iec104
+  void slot_tcpconnect(const QString& peerAddress); // tcp connect for iec104
   void slot_tcpdisconnect();      // tcp disconnect for iec104
-  void slot_commandActRespIndication(iec_obj* obj);
+  void slot_commandActRespIndication(const iec_obj& obj);
 
   void on_pbCopyClipb_clicked(); // copy log messages to clipboard
   void on_pbCopyVals_clicked(); // copy values table to clipboard
@@ -84,6 +88,11 @@ class MainWindow : public QMainWindow {
   void on_cb888Mode_stateChanged(int arg1);
 
   private:
+  void queueProtocolCall(const std::function<void(QIec104*)>& fn);
+  void queueProtocolCommand(const iec_obj& obj);
+  void processDataIndicationBatch(const QVector<iec_obj>& objects);
+  void shutdownProtocolThread();
+
   std::map <std::pair<int, int>, QTableWidgetItem*> mapPtItem_ColAddress; // map of points to cells of table
   std::map <std::pair<int, int>, QTableWidgetItem*> mapPtItem_ColCommonAddress;
   std::map <std::pair<int, int>, QTableWidgetItem*> mapPtItem_ColValue;
@@ -95,15 +104,28 @@ class MainWindow : public QMainWindow {
 
   Ui::MainWindow* ui;
   QTimer* tmLogMsg; // timer to show log messages
-  QIec104 i104;
+  QTimer* tmUiDataPump; // timer to batch UI point updates
+  QIec104* i104;
+  QThread protocolThread;
+  QQueue<QVector<iec_obj>> pendingDataIndications;
+  qsizetype pendingDataPointCount;
+  bool pointTableSortPending;
+  bool pointTableResizePending;
 
   unsigned LastCommandAddress;
   int SendCommands;             // 1 = allow sending commands, 0 = don't send commands
   int Hide;
+  int PrimaryAddress;
+  int SecondaryAddress;
+  int ForcePrimary;
+  bool ProtocolKeepAliveActive;
+  bool ProtocolShutdown;
+  QString SecondaryIp;
+  unsigned ProtocolPort;
 
   // I104M Related
   void I104M_Loga(QString str, int id = 0); // I104M: log messages
-  void I104M_processPoints(iec_obj* obj, unsigned numpoints);   // I104M: process points
+  void I104M_processPoints(const iec_obj* obj, unsigned numpoints);   // I104M: process points
   inline bool I104M_HaveDualHost() { return (I104M_host_dual != QHostAddress("0.0.0.0")); }
   QHostAddress I104M_host; // IP address from OSHMI main machine
   QHostAddress I104M_host_dual; // OSHMI dual host address (the other machine)
@@ -117,7 +139,7 @@ class MainWindow : public QMainWindow {
   QUdpSocket* udps = nullptr; // I104M: udp socket
   QTimer* tmI104M_kamsg = nullptr; // timer to send keep alive messages to the dual host
   void SendOSHMI(char* msg, unsigned int packet_size);
-  void fmtCP56Time(char*, cp56time2a*);
+  void fmtCP56Time(char*, const cp56time2a*);
 };
 
 

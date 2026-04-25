@@ -43,7 +43,7 @@ QIec104::QIec104(QObject *parent) : QObject(parent) {
   mLog.doLogTime();
 
   tcps = new QSslSocket(this);
-  tmKeepAlive = new QTimer();
+  tmKeepAlive = new QTimer(this);
 
   connect(tmKeepAlive, SIGNAL(timeout()), this, SLOT(slot_keep_alive()));
   connect(tcps, SIGNAL(readyRead()), this, SLOT(slot_tcpreadytoread()));
@@ -55,22 +55,17 @@ QIec104::QIec104(QObject *parent) : QObject(parent) {
           SLOT(slot_tcperror(QAbstractSocket::SocketError)),
           Qt::DirectConnection);
 
-  if (mUseTls) {
-      connect(tcps, &QSslSocket::sslErrors, this, &QIec104::slot_sslErrors);
-      connect(tcps, &QSslSocket::errorOccurred, this, &QIec104::slot_socketError);
-      connect(tcps, &QSslSocket::encrypted, this, &QIec104::slot_socketEncrypted);
-      connect(tcps, &QSslSocket::handshakeInterruptedOnError, this,
-              &QIec104::slot_handshakeInterruptedOnError);
-  }
+  connect(tcps, &QSslSocket::sslErrors, this, &QIec104::slot_sslErrors);
+  connect(tcps, &QSslSocket::errorOccurred, this, &QIec104::slot_socketError);
+  connect(tcps, &QSslSocket::encrypted, this, &QIec104::slot_socketEncrypted);
+  connect(tcps, &QSslSocket::handshakeInterruptedOnError, this,
+          &QIec104::slot_handshakeInterruptedOnError);
 
   // tcps->moveToThread(&tcpThread);
   // tcpThread.start(QThread::TimeCriticalPriority);
 }
 
-QIec104::~QIec104() {
-  delete tmKeepAlive;
-  delete tcps;
-}
+QIec104::~QIec104() = default;
 
 void QIec104::setTlsEnabled(bool enabled) {
   mUseTls = enabled;
@@ -107,7 +102,12 @@ void QIec104::waitBytes(int bytes, int msTout) {
 }
 
 void QIec104::dataIndication(iec_obj *obj, unsigned numpoints) {
-  emit signal_dataIndication(obj, numpoints);
+  QVector<iec_obj> objects;
+  objects.reserve(static_cast<qsizetype>(numpoints));
+  for (unsigned i = 0; i < numpoints; ++i) {
+    objects.append(obj[i]);
+  }
+  emit signal_dataIndication(objects);
 }
 
 void QIec104::connectTCP() {
@@ -267,7 +267,7 @@ void QIec104::slot_tcpconnect() {
       mLog.pushMsg("Plain TCP Connection Established.");
   }
   onConnectTCP();
-  emit signal_tcp_connect();
+  emit signal_tcp_connect(tcps->peerAddress().toString());
 }
 
 void QIec104::slot_modeChanged(QSslSocket::SslMode mode) {
@@ -306,7 +306,7 @@ void QIec104::interrogationActTermIndication() {
 }
 
 void QIec104::commandActRespIndication(iec_obj *obj) {
-  emit signal_commandActRespIndication(obj);
+  emit signal_commandActRespIndication(*obj);
 }
 
 void QIec104::terminate() {
