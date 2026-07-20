@@ -37,6 +37,7 @@ TLogMsg::TLogMsg()
     mMaxMsg = 1000;
     mDoLog = true;
     mRegTime = false;
+    mLastTime = 0;
     mLevel = 0;
 }
 
@@ -123,10 +124,9 @@ string TLogMsg::pullMsg()
     // se tem registro de hora, pega a hora e formata para exibir antes da mensagem
     if (mRegTime){
         char buffer [201];
-        static time_t hora_ant;
         time_t hora = mLstTime.front();
         mLstTime.pop_front();
-        if (hora != hora_ant)
+        if (hora != mLastTime)
           {
           struct tm * timeinfo;
           timeinfo = localtime ( &hora );
@@ -136,7 +136,7 @@ string TLogMsg::pullMsg()
           }
         else
           s = "         " + s;
-        hora_ant = hora;
+        mLastTime = hora;
     }
 
     return s;

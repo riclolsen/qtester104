@@ -45,7 +45,7 @@
 #include "iec104_class.h"
 #include "qiec104.h"
 
-#define QTESTER_VERSION "v3.0.0"
+#define QTESTER_VERSION "v3.1.0"
 #define QTESTER_COPYRIGHT "© 2010-present Ricardo Lastra Olsen"
 #define CURDIRINIFILENAME "/qtester104.ini"
 #define CONFDIRINIFILENAME "../conf/qtester104.ini"
@@ -115,7 +115,6 @@ class MainWindow : public QMainWindow {
   bool pointTableSortPending;
   bool pointTableResizePending;
   int logTickCount;
-  int logCircularIndex;
 
   unsigned LastCommandAddress;
   int SendCommands;             // 1 = allow sending commands, 0 = don't send commands

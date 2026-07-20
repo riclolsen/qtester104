@@ -39,7 +39,8 @@
 using namespace std;
 
 iec104_class::iec104_class() {
-  strncpy(slaveIP, "", 20);
+  memset(slaveIP, 0, sizeof(slaveIP));
+  memset(slaveIP_backup, 0, sizeof(slaveIP_backup));
 
   mapTiStr[0] = "M_UNDEF";
   mapTiStr[1] = "M_SP_NA_1";
@@ -167,6 +168,7 @@ iec104_class::iec104_class() {
   tout_startdtact = -1;
   tout_supervisory = -1;
   tout_testfr = -1;
+  tout_testfr_con = -1;
   tout_gi = -1;
   VS = 0;
   VR = 0;
@@ -217,11 +219,13 @@ void iec104_class::setPortTCP(unsigned port) {
 }
 
 void iec104_class::setSecondaryIP(char* ip) {
-  strncpy(slaveIP, ip, 20);
+  strncpy(slaveIP, ip, sizeof(slaveIP) - 1);
+  slaveIP[sizeof(slaveIP) - 1] = '\0';
 }
 
 void iec104_class::setSecondaryIP_backup(char* ip) {
-  strncpy(slaveIP_backup, ip, 20);
+  strncpy(slaveIP_backup, ip, sizeof(slaveIP_backup) - 1);
+  slaveIP_backup[sizeof(slaveIP_backup) - 1] = '\0';
 }
 
 char* iec104_class::getSecondaryIP() {
@@ -258,6 +262,8 @@ void iec104_class::onConnectTCP() {
   VS = 0;
   VR = 0;
   test_command_count = 0;
+  broken_msg = false; // discard any partial apdu from a previous connection
+  rxBytes = 0;
   mLog.pushMsg("*** TCP CONNECT!");
   sendStartDTACT();
 }
@@ -267,6 +273,10 @@ void iec104_class::onDisconnectTCP() {
   tout_startdtact = -1;
   tout_supervisory = -1;
   tout_gi = -1;
+  tout_testfr = -1;
+  tout_testfr_con = -1;
+  broken_msg = false;
+  rxBytes = 0;
   TxOk = false;
   mLog.pushMsg("*** TCP DISCONNECT!");
 }
@@ -311,6 +321,18 @@ void iec104_class::onTimerSecond() {
         apdu.NR = 0;
         sendTCP(reinterpret_cast<char*>(&apdu), 6);
         mLog.pushMsg("     TESTFRACT");
+        tout_testfr_con = t1_startdtact; // wait up to t1 for TESTFRCON
+      }
+    }
+
+    // no answer to the test frame in t1: connection is dead, force a
+    // disconnect so the keep alive logic can reconnect
+    if (tout_testfr_con > 0) {
+      tout_testfr_con--;
+      if (tout_testfr_con == 0) {
+        tout_testfr_con = -1;
+        mLog.pushMsg("*** TESTFRCON TIMEOUT!");
+        disconnectTCP();
       }
     }
   }
@@ -391,7 +413,7 @@ void iec104_class::confTestCommand() {
   wapdu.asdu107.ioa8 = 0;
   wapdu.asdu107.tsc = 0;
   wapdu.asdu107.time.year = agora->tm_year % 100;
-  wapdu.asdu107.time.month = static_cast<uint8_t>(agora->tm_mon);
+  wapdu.asdu107.time.month = static_cast<uint8_t>(agora->tm_mon + 1);
   wapdu.asdu107.time.mday = static_cast<uint8_t>(agora->tm_mday);
   wapdu.asdu107.time.hour = static_cast<uint8_t>(agora->tm_hour);
   wapdu.asdu107.time.min = static_cast<uint8_t>(agora->tm_min);
@@ -424,9 +446,7 @@ void iec104_class::sendStartDTACT() {
 
 // tcp packet ready to be read from connection with the iec104 slave
 void iec104_class::packetReadyTCP() {
-  iec_apdu apdu;
-  unsigned char* br;
-  br = reinterpret_cast<unsigned char*>(&apdu);
+  unsigned char* br = reinterpret_cast<unsigned char*>(&rxApdu);
   int bytesrec;
   unsigned char byt;
   int len;
@@ -445,6 +465,7 @@ void iec104_class::packetReadyTCP() {
       bytesrec = readTCP(reinterpret_cast<char*>(br + 1), 1); // length of apdu
       if (bytesrec == 0)
         return;
+      rxBytes = 0; // no payload bytes received yet for this apdu
     }
 
     len = br[1];
@@ -454,28 +475,20 @@ void iec104_class::packetReadyTCP() {
       continue;
     }
 
-    waitBytes(len, 500);
-    bytesrec = readTCP(reinterpret_cast<char*>(br + 2), len); // read the remaining of the apdu
-    if (bytesrec == 0) {
-      mLog.pushMsg("R--> Broken apdu");
+    // read the remaining of the apdu, resuming from rxBytes when the previous
+    // read left the apdu incomplete (broken_msg)
+    waitBytes(len - rxBytes, 500);
+    bytesrec = readTCP(reinterpret_cast<char*>(br + 2 + rxBytes), len - rxBytes);
+    if (bytesrec > 0)
+      rxBytes += bytesrec;
+    if (rxBytes < len) {
+      sprintf(buflog, "R--> Broken apdu (%d of %d bytes), waiting for the rest...", rxBytes, len);
+      mLog.pushMsg(buflog);
       broken_msg = true;
       return;
-    } else if (bytesrec < len) {
-      int missing = len - bytesrec;
-      sprintf(buflog, "R--> There should be more to read (%d of %d): ", missing, len);
-      mLog.pushMsg(buflog);
-      waitBytes(missing, 500);
-      int bytesrec2 = readTCP(reinterpret_cast<char*>(br + 2 + bytesrec), missing); // read the remaining of the apdu
-      sprintf(buflog, "R--> Readed more %d", bytesrec2);
-      mLog.pushMsg(buflog);
-      if (bytesrec2 != missing) {
-        mLog.pushMsg("R--> Broken apdu!");
-        broken_msg = true;
-        return;
-      }
     }
 
-    //if ( apdu.asduh.ca != slaveAddress && apdu.asduh.ca != slaveASDUAddrCmd && len>4 )
+    //if ( rxApdu.asduh.ca != slaveAddress && rxApdu.asduh.ca != slaveASDUAddrCmd && len>4 )
     //  {
     //  broken_msg=false;
     //  mLog.pushMsg("R--> ASDU WITH UNEXPECTED ORIGIN! Ignoring...");
@@ -487,7 +500,7 @@ void iec104_class::packetReadyTCP() {
     if (mLog.isLogging()) {
       sprintf(buflog, "R--> %03d: ", len + 2);
       int lim = 100;
-      for (int i = 0; i < len + 2 && i < lim; i++) { // log up to 50 caracteres
+      for (int i = 0; i < len + 2 && i < lim; i++) { // log up to lim bytes
         sprintf(buflog + strlen(buflog), "%02x ", br[i]);
       }
       if (len > lim - 2)
@@ -495,8 +508,8 @@ void iec104_class::packetReadyTCP() {
       mLog.pushMsg(buflog);
     }
 
-    userprocAPDU(&apdu, len + 2);
-    parseAPDU(&apdu, len + 2);
+    userprocAPDU(&rxApdu, len + 2);
+    parseAPDU(&rxApdu, len + 2);
     if (bytesAvailableTCP() == 0)
       break;
   }
@@ -530,7 +543,7 @@ char* iec104_class::trim(char* s) {
     return s;      // handle empty string
   while (isspace(*s))
     s++;   // skip left side white spaces
-  for (i = int(strlen(s)) - 1; (isspace(s[i])); i--) ;    // skip right side white spaces
+  for (i = int(strlen(s)) - 1; i >= 0 && isspace(s[i]); i--) ;    // skip right side white spaces
   s[i + 1] = '\0';
   return s;
 }
@@ -545,10 +558,11 @@ void iec104_class::LogPoint(char* buf, int address, double val, char* qualifier,
       return;
     }
 
+    const char* qual = (qualifier != nullptr) ? qualifier : "";
     if (ceil(val) == val)   // test val for integer whole value
-      sprintf(buf + strlen(buf), "[%d %1.0f %s", address, val, qualifier);
+      sprintf(buf + strlen(buf), "[%d %1.0f %s", address, val, qual);
     else
-      sprintf(buf + strlen(buf), "[%d %1.3f %s", address, val, qualifier);
+      sprintf(buf + strlen(buf), "[%d %1.3f %s", address, val, qual);
 
     trim(buf);
 
@@ -567,6 +581,35 @@ void iec104_class::LogPoint(char* buf, int address, double val, char* qualifier,
   }
 }
 
+// size in bytes of the information element of monitored (multi-object) ASDU
+// types, not counting the 3 byte object address; -1 = not length-checked
+static int infoElementSize(unsigned char type) {
+  switch (type) {
+    case iec104_class::M_SP_NA_1: return 1;
+    case iec104_class::M_DP_NA_1: return 1;
+    case iec104_class::M_ST_NA_1: return 2;
+    case iec104_class::M_BO_NA_1: return 5;
+    case iec104_class::M_ME_NA_1: return 3;
+    case iec104_class::M_ME_NB_1: return 3;
+    case iec104_class::M_ME_NC_1: return 5;
+    case iec104_class::M_IT_NA_1: return 5;
+    case iec104_class::M_PS_NA_1: return 5;
+    case iec104_class::M_ME_ND_1: return 2;
+    case iec104_class::M_SP_TB_1: return 8;
+    case iec104_class::M_DP_TB_1: return 8;
+    case iec104_class::M_ST_TB_1: return 9;
+    case iec104_class::M_BO_TB_1: return 12;
+    case iec104_class::M_ME_TD_1: return 10;
+    case iec104_class::M_ME_TE_1: return 10;
+    case iec104_class::M_ME_TF_1: return 12;
+    case iec104_class::M_IT_TB_1: return 12;
+    case iec104_class::M_EP_TD_1: return 10;
+    case iec104_class::M_EP_TE_1: return 11;
+    case iec104_class::M_EP_TF_1: return 11;
+    default: return -1;
+  }
+}
+
 void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
   iec_apdu wapdu;      // buffer to assemble apdu to send
   string qs, qsa;
@@ -577,6 +620,12 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
     // invalid frame
     mLog.pushMsg("R--> ERROR: NO START IN FRAME");
     return;
+  }
+
+  if (accountandrespond) {
+    tout_testfr_con = -1;       // any frame received proves the link is alive
+    if (connectedTCP && TxOk)
+      tout_testfr = t3_testfr;  // restart the idle detection timer
   }
 
   if (sz == 6) {
@@ -607,6 +656,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           mLog.pushMsg("     STARTDTCON");
           tout_startdtact = -1; // flag confirmation of STARTDT, not to timeout
           TxOk = true;
+          tout_testfr = t3_testfr; // start the idle detection timer
           tout_gi = 15; // request GI when communication starts
           break;
 
@@ -673,6 +723,22 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
 
     mLog.pushMsg(oss.str().c_str());
 
+    // validate that the declared number of objects fits inside the received
+    // apdu, avoiding reads beyond the receive buffer on malformed frames
+    bool valid_length = true;
+    const int objsz = infoElementSize(papdu->asduh.type);
+    if (objsz > 0) {
+      const int available = sz - 12; // minus start+length+NS+NR and asdu header
+      const int needed = papdu->asduh.sq
+                             ? 3 + int(papdu->asduh.num) * objsz
+                             : int(papdu->asduh.num) * (3 + objsz);
+      if (needed > available) {
+        mLog.pushMsg("R--> ERROR: OBJECT COUNT EXCEEDS APDU SIZE, IGNORING ASDU");
+        valid_length = false;
+      }
+    }
+
+    if (valid_length)
     switch (papdu->asduh.type) {
       case M_SP_NA_1: { // 1: DIGITAL SINGLE
         char logpointbuf[15000] = "";
@@ -1780,7 +1846,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         }
 
         // send indication to user
-        iec_obj iobj;
+        iec_obj iobj = {};
         iobj.address = papdu->nsq45.ioa16 + (unsigned(papdu->nsq45.ioa8) << 16);
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
@@ -1820,7 +1886,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         }
 
         // send indication to user
-        iec_obj iobj;
+        iec_obj iobj = {};
         iobj.address = papdu->nsq46.ioa16 + (unsigned(papdu->nsq46.ioa8) << 16);
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
@@ -1860,7 +1926,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         }
 
         // send indication to user
-        iec_obj iobj;
+        iec_obj iobj = {};
         iobj.address = papdu->nsq47.ioa16 + (unsigned(papdu->nsq47.ioa8) << 16);
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
@@ -1900,7 +1966,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         }
 
         // send indication to user
-        iec_obj iobj;
+        iec_obj iobj = {};
         iobj.address = papdu->nsq58.ioa16 + (unsigned(papdu->nsq58.ioa8) << 16);
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
@@ -1940,7 +2006,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         }
 
         // send indication to user
-        iec_obj iobj;
+        iec_obj iobj = {};
         iobj.address = papdu->nsq59.ioa16 + (unsigned(papdu->nsq59.ioa8) << 16);
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
@@ -1980,7 +2046,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         }
 
         // send indication to user
-        iec_obj iobj;
+        iec_obj iobj = {};
         iobj.address = papdu->nsq60.ioa16 + (unsigned(papdu->nsq60.ioa8) << 16);
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
@@ -2020,7 +2086,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         }
 
         // send indication to user
-        iec_obj iobj;
+        iec_obj iobj = {};
         iobj.address = papdu->nsq48.ioa16 + (unsigned(papdu->nsq48.ioa8) << 16);
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
@@ -2060,7 +2126,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         }
 
         // send indication to user
-        iec_obj iobj;
+        iec_obj iobj = {};
         iobj.address = papdu->nsq61.ioa16 + (unsigned(papdu->nsq61.ioa8) << 16);
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
@@ -2100,7 +2166,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         }
 
         // send indication to user
-        iec_obj iobj;
+        iec_obj iobj = {};
         iobj.address = papdu->nsq49.ioa16 + (unsigned(papdu->nsq49.ioa8) << 16);
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
@@ -2140,7 +2206,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         }
 
         // send indication to user
-        iec_obj iobj;
+        iec_obj iobj = {};
         iobj.address = papdu->nsq62.ioa16 + (unsigned(papdu->nsq62.ioa8) << 16);
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
@@ -2181,7 +2247,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         }
 
         // send indication to user
-        iec_obj iobj;
+        iec_obj iobj = {};
         iobj.address = papdu->nsq50.ioa16 + (unsigned(papdu->nsq50.ioa8) << 16);
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
@@ -2221,7 +2287,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         }
 
         // send indication to user
-        iec_obj iobj;
+        iec_obj iobj = {};
         iobj.address = papdu->nsq63.ioa16 + (unsigned(papdu->nsq63.ioa8) << 16);
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
@@ -2292,7 +2358,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         }
 
         // send indication to user
-        iec_obj iobj;
+        iec_obj iobj = {};
         iobj.address = papdu->asdu102.ioa16 + (unsigned(papdu->asdu102.ioa8) << 16);
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
@@ -2359,7 +2425,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         }
 
         // send indication to user
-        iec_obj iobj;
+        iec_obj iobj = {};
         iobj.address = papdu->nsq110.ioa16 + (unsigned(papdu->nsq110.ioa8) << 16);
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
@@ -2404,7 +2470,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         }
 
         // send indication to user
-        iec_obj iobj;
+        iec_obj iobj = {};
         iobj.address = papdu->nsq111.ioa16 + (unsigned(papdu->nsq111.ioa8) << 16);
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
@@ -2449,8 +2515,8 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         }
 
         // send indication to user
-        iec_obj iobj;
-        iobj.address = papdu->nsq110.ioa16 + (unsigned(papdu->nsq110.ioa8) << 16);
+        iec_obj iobj = {};
+        iobj.address = papdu->nsq112.ioa16 + (unsigned(papdu->nsq112.ioa8) << 16);
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
         iobj.pn = papdu->asduh.pn;
@@ -2488,7 +2554,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         }
 
         // send indication to user
-        iec_obj iobj;
+        iec_obj iobj = {};
         iobj.address = papdu->nsq113.ioa16 + (unsigned(papdu->nsq113.ioa8) << 16);
         iobj.ca = papdu->asduh.ca;
         iobj.cause = papdu->asduh.cause;
@@ -2686,7 +2752,6 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.nsq58.obj.time.mday = static_cast<uint8_t>(agora->tm_mday);
       apducmd.nsq58.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
       apducmd.nsq58.obj.time.min = static_cast<uint8_t>(agora->tm_min);
-      apducmd.nsq58.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
       apducmd.nsq58.obj.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000);
       apducmd.nsq58.obj.time.iv = 0;
       apducmd.nsq58.obj.time.su = static_cast<uint8_t>(agora->tm_isdst);
@@ -2734,7 +2799,6 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.nsq59.obj.time.mday = static_cast<uint8_t>(agora->tm_mday);
       apducmd.nsq59.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
       apducmd.nsq59.obj.time.min = static_cast<uint8_t>(agora->tm_min);
-      apducmd.nsq59.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
       apducmd.nsq59.obj.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000);
       apducmd.nsq59.obj.time.iv = 0;
       apducmd.nsq59.obj.time.su = static_cast<uint8_t>(agora->tm_isdst);
@@ -2782,7 +2846,6 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.nsq60.obj.time.mday = static_cast<uint8_t>(agora->tm_mday);
       apducmd.nsq60.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
       apducmd.nsq60.obj.time.min = static_cast<uint8_t>(agora->tm_min);
-      apducmd.nsq60.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
       apducmd.nsq60.obj.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000);
       apducmd.nsq60.obj.time.iv = 0;
       apducmd.nsq60.obj.time.su = static_cast<uint8_t>(agora->tm_isdst);
@@ -2861,7 +2924,6 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.nsq61.obj.time.mday = static_cast<uint8_t>(agora->tm_mday);
       apducmd.nsq61.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
       apducmd.nsq61.obj.time.min = static_cast<uint8_t>(agora->tm_min);
-      apducmd.nsq61.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
       apducmd.nsq61.obj.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000);
       apducmd.nsq61.obj.time.iv = 0;
       apducmd.nsq61.obj.time.su = static_cast<uint8_t>(agora->tm_isdst);
@@ -2939,7 +3001,6 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.nsq62.obj.time.mday = static_cast<uint8_t>(agora->tm_mday);
       apducmd.nsq62.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
       apducmd.nsq62.obj.time.min = static_cast<uint8_t>(agora->tm_min);
-      apducmd.nsq62.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
       apducmd.nsq62.obj.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000);
       apducmd.nsq62.obj.time.iv = 0;
       apducmd.nsq62.obj.time.su = static_cast<uint8_t>(agora->tm_isdst);
@@ -3017,7 +3078,6 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.nsq63.obj.time.mday = static_cast<uint8_t>(agora->tm_mday);
       apducmd.nsq63.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
       apducmd.nsq63.obj.time.min = static_cast<uint8_t>(agora->tm_min);
-      apducmd.nsq63.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
       apducmd.nsq63.obj.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000);
       apducmd.nsq63.obj.time.iv = 0;
       apducmd.nsq63.obj.time.su = static_cast<uint8_t>(agora->tm_isdst);
@@ -3070,9 +3130,10 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       break;
     case C_RP_NA_1: // reset process command
       apducmd.start = START;
-      apducmd.length = sizeof(apducmd.NS) + sizeof(apducmd.NR) + sizeof(apducmd.asduh) + sizeof(apducmd.asdu107);
+      apducmd.length = sizeof(apducmd.NS) + sizeof(apducmd.NR) + sizeof(apducmd.asduh) + 4; // IOA (3 bytes) + QRP
       apducmd.NS = VS;
       apducmd.NR = VR;
+      apducmd.asduh.type = obj->type;
       apducmd.asduh.num = 1;
       apducmd.asduh.sq = 0;
       apducmd.asduh.cause = obj->cause;
@@ -3080,14 +3141,17 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.asduh.pn = 0;
       apducmd.asduh.oa = masterAddress;
       apducmd.asduh.ca = obj->ca;
-      apducmd.asdu105.qrp = static_cast<unsigned char>(obj->value);
+      apducmd.dados[0] = 0; // IOA = 0
+      apducmd.dados[1] = 0;
+      apducmd.dados[2] = 0;
+      apducmd.dados[3] = static_cast<unsigned char>(obj->value); // QRP
       sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
       VS += 2;
 
       oss.str("");
       oss << "     RESET PROCESS COMMAND"
           << " QRP "
-          << unsigned(apducmd.asdu105.qrp);
+          << unsigned(apducmd.dados[3]);
       mLog.pushMsg(oss.str().c_str());
       break;
     case C_TS_TA_1: // test command with time tag
@@ -3310,6 +3374,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       mLog.pushMsg(oss.str().c_str());
       break;
     default:
+      mLog.pushMsg("     COMMAND TYPE NOT IMPLEMENTED, NOT SENT");
       return false;
   }
 

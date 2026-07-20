@@ -60,6 +60,7 @@ private:
     unsigned int mMaxMsg;
     bool mDoLog;
     bool mRegTime;
+    time_t mLastTime; // time of the previously pulled message
     unsigned int mLevel; // exibition level 0=all, 1 an on, exibit more information progressively
 };
 

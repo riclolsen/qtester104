@@ -190,7 +190,8 @@ void QIec104::connectTCP() {
           }
 
           sslConfig.setSslOption(QSsl::SslOptionDisableServerNameIndication, true);
-          QSslConfiguration::setDefaultConfiguration(sslConfig);
+          // apply per-socket only: changing the app-default configuration here
+          // would leak this tab's TLS settings into the other RTU tabs
           tcps->setSslConfiguration(sslConfig);
           tcps->setPeerVerifyMode(mVerifyMode); // Set verification mode
           if (mVerifyMode > 1) {

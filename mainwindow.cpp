@@ -37,10 +37,12 @@
 #include <QItemSelectionModel>
 #include <QRegularExpression>
 #include <QMetaObject>
+#include <QScrollBar>
 #include <QSslSocket>
 #include <QPalette>
 #include <QStyleFactory>
 #include <QSettings>
+#include <QTextCursor>
 #include <string>
 
 using namespace std;
@@ -107,7 +109,6 @@ MainWindow::MainWindow(const QString& iniPath,
       pointTableSortPending(false),
       pointTableResizePending(false),
       logTickCount(0),
-      logCircularIndex(0),
       LastCommandAddress(0),
       SendCommands(0),
       Hide(0),
@@ -431,21 +432,26 @@ void MainWindow::slot_I104M_ready_to_read() {
             (QString("::ffff:") + I104M_host_dual.toString())) {
       I104M_Loga(QString("R--> I104M: Message from invalid origin ") +
                  address.toString());
-      return;
+      continue;
     }
 
     // I104M message
     t_msgcmd *pmsg = reinterpret_cast<t_msgcmd *>(br);
 
+    const int dumplim = 100; // limit the hex dump so buf cannot overflow
     sprintf(buf, "%3d: I104M: ", bytesrec);
-    for (int i = 0; i < bytesrec; i++)
+    for (int i = 0; i < bytesrec && i < dumplim; i++)
       sprintf(buf + strlen(buf), "%02x ", br[i]);
+    if (bytesrec > dumplim)
+      sprintf(buf + strlen(buf), "...");
     I104M_Loga(buf);
 
-    if (pmsg->signature != MSGCMD_SIG)
+    if (bytesrec < int(sizeof(t_msgcmd)) || pmsg->signature != MSGCMD_SIG) {
       I104M_Loga("R--> I104M: Invalid Message!");
+      continue;
+    }
 
-    iec_obj obj;
+    iec_obj obj = {};
     obj.cause = iec104_class::ACTIVATION;
     obj.address = pmsg->endereco;
     obj.ca = static_cast<unsigned short>(pmsg->utr);
@@ -460,14 +466,14 @@ void MainWindow::slot_I104M_ready_to_read() {
         I104M_Loga("R--> I104M: REQ GI");
         queueProtocolCall([](QIec104* worker) { worker->solicitGI(); });
       } else if (pmsg->endereco == I104M_SPECIAL_CMD_ADDR_KEEP_ALIVE &&
-                 (address.toString() != I104M_host_dual.toString() ||
-                  address.toString() !=
+                 (address.toString() == I104M_host_dual.toString() ||
+                  address.toString() ==
                       (QString("::ffff:") + I104M_host_dual.toString())) &&
-                 ForcePrimary == 0) { // keep alive
+                 ForcePrimary == 0) { // keep alive from the redundant computer
         I104M_Loga("R--> I104M: KEEP ALIVE FROM REDUNDANT COMPUTER");
         if (isPrimary) {
           I104M_Loga("     I104M: BECOMMING SECONDARY!");
-          ui->lbMode->setText("<font color='red'></font>");
+          ui->lbMode->setText("<font color='red'>Secondary</font>");
         }
         isPrimary = false;
         queueProtocolCall([](QIec104* worker) { worker->disable_connect(); });
@@ -541,7 +547,7 @@ void MainWindow::slot_I104M_ready_to_read() {
 
 // Envio de comando
 void MainWindow::on_pbSendCommandsButton_clicked() {
-  iec_obj obj;
+  iec_obj obj = {};
   obj.type = static_cast<unsigned char>(
       ui->cbCmdAsdu->currentText()
           .left(ui->cbCmdAsdu->currentText().indexOf(':'))
@@ -989,7 +995,6 @@ void MainWindow::processDataIndicationBatch(const QVector<iec_obj>& objects) {
 }
 
 void MainWindow::slot_timer_logmsg() {
-  static const int logBufSize = 20000;
   static const int maxLogMsgsPerTick = 250;
 
   if (Hide)
@@ -1005,55 +1010,39 @@ void MainWindow::slot_timer_logmsg() {
     }
 
   if (i104->mLog.haveMsg()) {
+    // append the whole batch inside a single edit block: one layout/paint pass;
+    // the document's maximumBlockCount (set in the .ui) discards the oldest
+    // lines automatically once the log is full
     int logMsgsProcessed = 0;
-    ui->lwLog->setUpdatesEnabled(false);
+    QTextCursor cur(ui->lwLog->document());
+    cur.movePosition(QTextCursor::End);
+    cur.beginEditBlock();
     while (i104->mLog.haveMsg() && logMsgsProcessed < maxLogMsgsPerTick) {
-      if (ui->lwLog->count() < logBufSize) {
-        // buffer not filled: create new lines
-        ui->lwLog->addItem(i104->mLog.pullMsg().c_str());
+      const QString msg = QString::fromStdString(i104->mLog.pullMsg());
+
+      QTextCharFormat fmt;
+      if (msg.contains(QLatin1String("I104M"))) {
+        fmt.setForeground(Qt::darkGray);
+      } else if (msg.contains(QLatin1String("COMMAND"))) {
+        fmt.setForeground(Qt::darkGray);
+        fmt.setBackground(Qt::lightGray);
+      } else if (msg.contains(QLatin1Char('['))) {
+        fmt.setForeground(Qt::red);
       } else {
-        // buffer filled: rewrite lines
-        ui->lwLog->item(logCircularIndex % logBufSize)
-            ->setText(i104->mLog.pullMsg().c_str());
-        // Marks end of circular buffer
-        ui->lwLog->item((logCircularIndex + 1) % logBufSize)
-            ->setText("=================================================");
-        ui->lwLog->item((logCircularIndex + 1) % logBufSize)
-            ->setForeground(Qt::green);
-        ui->lwLog->item((logCircularIndex + 1) % logBufSize)
-            ->setBackground(Qt::yellow);
+        fmt.setForeground(Qt::darkGray);
       }
 
-      if (ui->lwLog->item(logCircularIndex % logBufSize)->text().indexOf("I104M") >=
-          0) {
-        ui->lwLog->item(logCircularIndex % logBufSize)->setForeground(Qt::darkGray);
-        ui->lwLog->item(logCircularIndex % logBufSize)
-            ->setBackground(Qt::transparent);
-      } else if (ui->lwLog->item(logCircularIndex % logBufSize)
-                     ->text()
-                     .indexOf("COMMAND") >= 0) {
-        ui->lwLog->item(logCircularIndex % logBufSize)->setForeground(Qt::darkGray);
-        ui->lwLog->item(logCircularIndex % logBufSize)->setBackground(Qt::lightGray);
-      } else if (ui->lwLog->item(logCircularIndex % logBufSize)
-                     ->text()
-                     .indexOf("[") >= 0) {
-        ui->lwLog->item(logCircularIndex % logBufSize)->setForeground(Qt::red);
-        ui->lwLog->item(logCircularIndex % logBufSize)
-            ->setBackground(Qt::transparent);
-      } else {
-        ui->lwLog->item(logCircularIndex % logBufSize)->setForeground(Qt::darkGray);
-        ui->lwLog->item(logCircularIndex % logBufSize)
-            ->setBackground(Qt::transparent);
-      }
-      logCircularIndex++;
+      if (!cur.atStart())
+        cur.insertBlock();
+      cur.insertText(msg, fmt);
       logMsgsProcessed++;
     }
+    cur.endEditBlock();
 
     if (ui->cbAutoScroll->isChecked()) {
-      ui->lwLog->scrollToItem(ui->lwLog->item((logCircularIndex - 1) % logBufSize),
-                              QAbstractItemView::PositionAtBottom);
+      QScrollBar* vbar = ui->lwLog->verticalScrollBar();
+      vbar->setValue(vbar->maximum());
     }
-    ui->lwLog->setUpdatesEnabled(true);
   }
 }
 
@@ -1114,6 +1103,10 @@ void MainWindow::slot_commandActRespIndication(const iec_obj& obj) {
   static const char *kpamsg[] = {"unu ", "thr ", "fil ",
                                  "lli ", "hli ", "res "};
   // static const char* qpamsg[] = { "unu ", "gen ", "obj ", "trm ", "res " };
+  // clamp device provided indexes to the "reserved" entry of the tables above
+  const unsigned qu_idx = obj.qu > 3 ? 4 : obj.qu;
+  const unsigned kpa_idx = obj.kpa > 4 ? 5 : obj.kpa;
+  const unsigned qpa_idx = obj.qpa > 4 ? 5 : obj.qpa;
 
   if (obj.address == 0)
     return;
@@ -1202,7 +1195,7 @@ void MainWindow::slot_commandActRespIndication(const iec_obj& obj) {
       sprintf(buf, "%d", int(obj.scs));
       mapPtItem_ColValue[std::make_pair(obj.ca, obj.address)]->setText(buf);
       sprintf(buf, "%s%s%s%s", pnmsg[obj.pn], sglmsg[obj.scs],
-              selmsg[obj.se], qumsg[obj.qu]);
+              selmsg[obj.se], qumsg[qu_idx]);
       break;
     case iec104_class::C_DC_TA_1:
       fmtCP56Time(buftt, &obj.timetag);
@@ -1211,7 +1204,7 @@ void MainWindow::slot_commandActRespIndication(const iec_obj& obj) {
       sprintf(buf, "%d", int(obj.dcs));
       mapPtItem_ColValue[std::make_pair(obj.ca, obj.address)]->setText(buf);
       sprintf(buf, "%s%s%s%s", pnmsg[obj.pn], dblmsg[obj.dcs],
-              selmsg[obj.se], qumsg[obj.qu]);
+              selmsg[obj.se], qumsg[qu_idx]);
       break;
     case iec104_class::C_RC_TA_1:
       fmtCP56Time(buftt, &obj.timetag);
@@ -1250,11 +1243,11 @@ void MainWindow::slot_commandActRespIndication(const iec_obj& obj) {
     case iec104_class::P_ME_NB_1:
       [[fallthrough]];
     case iec104_class::P_ME_NC_1:
-      sprintf(buf, "%s%s%s%s", pnmsg[obj.pn], kpamsg[obj.kpa],
+      sprintf(buf, "%s%s%s%s", pnmsg[obj.pn], kpamsg[kpa_idx],
               obj.lpc ? "lpc " : "", obj.pop ? "pop " : "");
       break;
     case iec104_class::P_AC_NA_1:
-      sprintf(buf, "%s%s", pnmsg[obj.pn], kpamsg[obj.qpa]);
+      sprintf(buf, "%s%s", pnmsg[obj.pn], kpamsg[qpa_idx]);
       break;
     }
 
@@ -1401,12 +1394,7 @@ void MainWindow::on_cbLog_clicked() {
 }
 
 void MainWindow::on_pbCopyClipb_clicked() {
-  int itemsCount = ui->lwLog->count();
-  QStringList strings;
-  for (int i = 0; i < itemsCount; ++i)
-    strings << ui->lwLog->item(i)->text();
-
-  QApplication::clipboard()->setText(strings.join("\n"));
+  QApplication::clipboard()->setText(ui->lwLog->toPlainText());
 }
 
 void MainWindow::on_pbCopyVals_clicked() {
@@ -1681,9 +1669,9 @@ void MainWindow::I104M_processPoints(const iec_obj *obj, unsigned numpoints) {
 
       // value and qualifier
       integrated_seq *i104mobj = reinterpret_cast<integrated_seq *>(paddr + 1);
-      // map carry to overflow
+      // map carry to overflow (bit 0), adjusted to nt (bit 6), invalid to bit 7
       i104mobj->qds = static_cast<unsigned char>(
-          (obj->cy << 7) | (obj->cadj << 6) | (obj->iv << 7));
+          obj->cy | (obj->cadj << 6) | (obj->iv << 7));
       i104mobj->bcr = obj->bcr;
     }
 

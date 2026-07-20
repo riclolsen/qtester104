@@ -237,7 +237,11 @@ private:
   int tout_supervisory;   // countdown to send supervisory window control
   int tout_gi;            // countdown to send general interrogation
   int tout_testfr;        // countdown to send test frame
+  int tout_testfr_con;    // countdown waiting for TESTFRCON after TESTFRACT
   bool broken_msg = false;
+  iec_apdu rxApdu;   // receive buffer, persists across calls to resume a
+                     // partially received apdu
+  int rxBytes = 0;   // apdu payload bytes already received (after start+length)
   bool connectedTCP; // tcp connection state
   bool
       seq_order_check; // if set: test message order, disconnect if out of order

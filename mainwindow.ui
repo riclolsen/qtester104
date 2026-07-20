@@ -232,7 +232,7 @@ Use 1 or 2 for digital double</string>
       <property name="orientation">
        <enum>Qt::Orientation::Horizontal</enum>
       </property>
-      <widget class="QListWidget" name="lwLog">
+      <widget class="QPlainTextEdit" name="lwLog">
        <property name="sizePolicy">
         <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
          <horstretch>0</horstretch>
@@ -251,14 +251,17 @@ Use 1 or 2 for digital double</string>
        <property name="horizontalScrollBarPolicy">
         <enum>Qt::ScrollBarPolicy::ScrollBarAlwaysOn</enum>
        </property>
-       <property name="selectionMode">
-        <enum>QAbstractItemView::SelectionMode::NoSelection</enum>
+       <property name="undoRedoEnabled">
+        <bool>false</bool>
        </property>
-       <property name="resizeMode">
-        <enum>QListView::ResizeMode::Adjust</enum>
+       <property name="lineWrapMode">
+        <enum>QPlainTextEdit::LineWrapMode::NoWrap</enum>
        </property>
-       <property name="layoutMode">
-        <enum>QListView::LayoutMode::SinglePass</enum>
+       <property name="readOnly">
+        <bool>true</bool>
+       </property>
+       <property name="maximumBlockCount">
+        <number>20000</number>
        </property>
       </widget>
       <widget class="QTableWidget" name="twPontos">
