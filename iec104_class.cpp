@@ -2343,10 +2343,13 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         if (mLog.isLogging()) {
           oss.str("");
           oss << "     ";
-          if (papdu->asduh.cause == ACTCONFIRM)
-            oss << "ACTIVATION CONFIRMATION ";
-          else if (papdu->asduh.cause == ACTTERM)
-            oss << "ACTIVATION TERMINATION ";
+          // valid COT for a read command/response is REQUEST(5); anything
+          // else (e.g. UNKNOWN_TYPE/UNKNOWN_COT/UNKNOWN_CA/UNKNOWN_IOA) means
+          // the slave rejected it, not an activation confirm/term
+          if (papdu->asduh.cause == REQUEST)
+            oss << "REQUESTED ";
+          else
+            oss << causeStr(papdu->asduh.cause) << " ";
           if (papdu->asduh.pn == POSITIVE)
             oss << "POSITIVE ";
           else
@@ -2617,7 +2620,9 @@ bool iec104_class::sendCommand(iec_obj* obj) {
   tm* agora = localtime(&tm1);
   stringstream oss;
 
-  obj->cause = ACTIVATION;
+  // C_RD_NA_1 (read command) is only valid with COT=REQUEST; every other
+  // command type uses COT=ACTIVATION
+  obj->cause = (obj->type == C_RD_NA_1) ? REQUEST : ACTIVATION;
 
   if (obj->ca == 0)
     obj->ca = slaveAddress;

@@ -139,12 +139,12 @@ Use 1 or 2 for digital double</string>
       </item>
       <item>
        <property name="text">
-        <string>101: Counter Interrogation Command - C_CI_NA_1 *NOT IMPL</string>
+        <string>101: Counter Interrogation Command - C_CI_NA_1</string>
        </property>
       </item>
       <item>
        <property name="text">
-        <string>102: Read Command - C_RD_NA_1 *NOT IMPL</string>
+        <string>102: Read Command - C_RD_NA_1</string>
        </property>
       </item>
       <item>
