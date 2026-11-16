@@ -1,0 +1,128 @@
+name: Build release binaries
+
+on:
+  push:
+    tags:
+      - '**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  QT_VERSION: '6.10.0'
+
+jobs:
+  linux:
+    name: Linux x86_64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: linux_gcc_64
+          cache: true
+      - name: Build
+        run: |
+          mkdir build
+          cd build
+          qmake ../IEC104.pro CONFIG+=release CONFIG-=debug
+          make -j"$(nproc)"
+      - name: Package with Qt runtime
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+          # The deploy tool's bundled strip may not understand newer ELF sections.
+          NO_STRIP: '1'
+        run: |
+          curl --fail --location --retry 3 -o linuxdeploy-x86_64.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          curl --fail --location --retry 3 -o linuxdeploy-plugin-qt-x86_64.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x linuxdeploy*.AppImage
+          export QMAKE="$(command -v qmake)"
+          ./linuxdeploy-x86_64.AppImage --appdir QTester104 \
+            --executable build/QTester104 --plugin qt \
+            --desktop-file .github/packaging/QTester104.desktop \
+            --icon-file .github/packaging/QTester104.svg
+          cp qtester104.ini QTester104/usr/bin/
+          cp readme.txt License-gpl-3.0.txt QTester104/
+          test -x QTester104/AppRun
+          test -f QTester104/usr/plugins/tls/libqopensslbackend.so
+          mkdir dist
+          tar -czf dist/QTester104-linux-x86_64.tar.gz QTester104
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-binaries
+          path: dist/*
+          if-no-files-found: error
+
+  windows:
+    name: Windows x64
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Build
+        shell: cmd
+        run: |
+          mkdir build
+          cd build
+          qmake ..\IEC104.pro CONFIG+=release CONFIG-=debug CONFIG-=debug_and_release
+          if errorlevel 1 exit /b 1
+          nmake
+          if errorlevel 1 exit /b 1
+      - name: Package with Qt runtime
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path package, dist | Out-Null
+          Copy-Item build\QTester104.exe package\
+          windeployqt --release --compiler-runtime --dir package package\QTester104.exe
+          if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
+          if (!(Test-Path package\tls\qschannelbackend.dll)) { throw "Missing Windows TLS backend" }
+          Copy-Item qtester104.ini, readme.txt, License-gpl-3.0.txt package\
+          Compress-Archive -Path package\* -DestinationPath dist\QTester104-windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-binaries
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    needs: [linux, windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-binaries'
+          merge-multiple: true
+          path: dist
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cd dist
+          sha256sum QTester104-* > SHA256SUMS.txt
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
+          fi
+          gh release upload "$TAG" QTester104-* SHA256SUMS.txt --clobber

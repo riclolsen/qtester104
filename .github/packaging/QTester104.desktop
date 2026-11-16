@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=QTester104
+Comment=IEC 60870-5-104 protocol tester
+Exec=QTester104
+Icon=QTester104
+Categories=Development;Utility;
+Terminal=false
