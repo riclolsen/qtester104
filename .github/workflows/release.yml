@@ -15,6 +15,11 @@ concurrency:
 
 env:
   QT_VERSION: '6.12.0' # Qt 6.12 LTS
+  # aqtinstall 3.3.0 (latest release) can't find Qt 6.11+ for Windows: those
+  # versions use one repository folder per compiler. Support is merged upstream
+  # (miurahr/aqtinstall#1000) but unreleased, so pin that commit; switch back to
+  # a release (aqtversion) once one includes it.
+  AQT_SOURCE: 'git+https://github.com/miurahr/aqtinstall.git@5a49f2b391ae8ee1d3c0dd87f8b33c1d49a4deb7'
 
 jobs:
   linux:
@@ -26,6 +31,7 @@ jobs:
       - uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
+          aqtsource: ${{ env.AQT_SOURCE }}
           arch: linux_gcc_64
           cache: true
       - name: Install headless display
@@ -96,6 +102,7 @@ jobs:
       - uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
+          aqtsource: ${{ env.AQT_SOURCE }}
           arch: win64_msvc2022_64
           cache: true
       - name: Build
