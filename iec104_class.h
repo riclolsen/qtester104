@@ -242,6 +242,7 @@ private:
   iec_apdu rxApdu;   // receive buffer, persists across calls to resume a
                      // partially received apdu
   int rxBytes = 0;   // apdu payload bytes already received (after start+length)
+  bool startRx = false; // START received, its length byte not yet (the read ended in between)
   bool connectedTCP; // tcp connection state
   bool
       seq_order_check; // if set: test message order, disconnect if out of order
