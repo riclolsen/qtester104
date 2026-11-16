@@ -83,11 +83,63 @@ void MainWindow::queueProtocolCall(const std::function<void(QIec104*)>& fn) {
       Qt::QueuedConnection);
 }
 
-void MainWindow::queueProtocolCommand(const iec_obj& obj) {
+void MainWindow::queueProtocolCommand(const iec_obj& obj, bool fromI104M) {
+  iec_obj command = obj;
+  // sendCommand() uses the link address when the common address is zero;
+  // resolve it here so responses can be matched against the real address
+  if (command.ca == 0)
+    command.ca = static_cast<uint16_t>(SecondaryAddress);
+
+  LastCommand.active = true;
+  LastCommand.fromI104M = fromI104M;
+  LastCommand.cmd = command;
+  LastCommand.sentAt.start();
+
+  if (!SendCommands) {
+    i104->mLog.pushMsg("     COMMANDS NOT ALLOWED (ALLOW_COMMANDS=0), NOT SENT");
+    slot_commandRejected(command);
+    return;
+  }
+
   QMetaObject::invokeMethod(
       i104,
-      [worker = i104, command = obj]() mutable { worker->sendCommand(&command); },
+      [worker = i104, command]() { worker->sendCommandOrReject(command); },
       Qt::QueuedConnection);
+}
+
+// a response belongs to the last command only if it refers to the same
+// type, object and common address, and arrives before the timeout
+bool MainWindow::commandResponseMatches(const iec_obj& resp) const {
+  if (!LastCommand.active ||
+      LastCommand.sentAt.elapsed() > CommandResponseTimeoutMs)
+    return false;
+  const iec_obj& cmd = LastCommand.cmd;
+  return resp.type == cmd.type && resp.address == cmd.address &&
+         resp.ca == cmd.ca;
+}
+
+static bool sameCommandValue(const iec_obj& a, const iec_obj& b) {
+  switch (a.type) {
+  case iec104_class::C_SC_NA_1:
+  case iec104_class::C_SC_TA_1:
+    return a.scs == b.scs;
+  case iec104_class::C_DC_NA_1:
+  case iec104_class::C_DC_TA_1:
+    return a.dcs == b.dcs;
+  case iec104_class::C_RC_NA_1:
+  case iec104_class::C_RC_TA_1:
+    return a.rcs == b.rcs;
+  case iec104_class::C_SE_NA_1:
+  case iec104_class::C_SE_TA_1:
+  case iec104_class::C_SE_NB_1:
+  case iec104_class::C_SE_TB_1:
+    return short(a.value) == short(b.value);
+  case iec104_class::C_SE_NC_1:
+  case iec104_class::C_SE_TC_1:
+    return float(a.value) == float(b.value);
+  default:
+    return false; // no select/execute for other types
+  }
 }
 
 void MainWindow::shutdownProtocolThread() {
@@ -101,11 +153,15 @@ void MainWindow::shutdownProtocolThread() {
     return;
   }
 
-  QMetaObject::invokeMethod(i104, [worker = i104]() { worker->terminate(); },
-                            Qt::BlockingQueuedConnection);
+  // stop the timers/socket and hand the worker back to this thread from
+  // inside the worker thread (Qt only allows pushing an object from its own
+  // thread), so it can be safely destroyed here afterwards
+  QThread* const guiThread = QThread::currentThread();
+  QMetaObject::invokeMethod(
+      i104, [worker = i104, guiThread]() { worker->shutdownAndMoveTo(guiThread); },
+      Qt::BlockingQueuedConnection);
   protocolThread.quit();
   protocolThread.wait();
-  i104->moveToThread(QApplication::instance()->thread());
   delete i104;
   i104 = nullptr;
 }
@@ -125,7 +181,6 @@ MainWindow::MainWindow(const QString& iniPath,
       pointTableSortPending(false),
       pointTableResizePending(false),
       logTickCount(0),
-      LastCommandAddress(0),
       SendCommands(0),
       Hide(0),
       PrimaryAddress(1),
@@ -268,6 +323,8 @@ MainWindow::MainWindow(const QString& iniPath,
           &MainWindow::slot_tcpdisconnect);
   connect(i104, &QIec104::signal_commandActRespIndication, this,
           &MainWindow::slot_commandActRespIndication);
+  connect(i104, &QIec104::signal_commandRejected, this,
+          &MainWindow::slot_commandRejected);
 
   queueProtocolCall([=](QIec104* worker) {
     worker->setTlsEnabled(useTls != "0");
@@ -278,7 +335,7 @@ MainWindow::MainWindow(const QString& iniPath,
     worker->setPrimaryAddress(PrimaryAddress);
     worker->ForcePrimary = ForcePrimary;
     worker->setSecondaryAddress(SecondaryAddress);
-    worker->SendCommands = SendCommands;
+    worker->setCommandsEnabled(SendCommands != 0);
     worker->setSecondaryIP_backup(
         const_cast<char*>(IPEscravoBackup.toStdString().c_str()));
     worker->setSecondaryIP(const_cast<char*>(SecondaryIp.toStdString().c_str()));
@@ -502,16 +559,14 @@ void MainWindow::slot_I104M_ready_to_read() {
       sprintf(buf, "R--> I104M: Single Command %s", pmsg->onoff ? "on" : "off");
       I104M_Loga(buf);
       obj.sp = static_cast<unsigned char>(pmsg->onoff);
-      queueProtocolCommand(obj);
-      LastCommandAddress = obj.address;
+      queueProtocolCommand(obj, true);
       break;
     case iec104_class::C_DC_TA_1: // double command with time tag
     case iec104_class::C_DC_NA_1: // double command
       sprintf(buf, "R--> I104M: Double Command %s", pmsg->onoff ? "on" : "off");
       I104M_Loga(buf);
       obj.dp = pmsg->onoff ? 2 : 1;
-      queueProtocolCommand(obj);
-      LastCommandAddress = obj.address;
+      queueProtocolCommand(obj, true);
       break;
     case iec104_class::C_SE_TA_1: // set-point normalised command with time tag
     case iec104_class::C_SE_NA_1: // set-point normalised command
@@ -519,8 +574,7 @@ void MainWindow::slot_I104M_ready_to_read() {
               double(pmsg->setpoint));
       I104M_Loga(buf);
       obj.value = pmsg->setpoint;
-      queueProtocolCommand(obj);
-      LastCommandAddress = obj.address;
+      queueProtocolCommand(obj, true);
       break;
     case iec104_class::C_SE_TB_1: // set-point scaled command with time tag
     case iec104_class::C_SE_NB_1: // set-point scaled command
@@ -528,8 +582,7 @@ void MainWindow::slot_I104M_ready_to_read() {
               double(pmsg->setpoint));
       I104M_Loga(buf);
       obj.value = pmsg->setpoint;
-      queueProtocolCommand(obj);
-      LastCommandAddress = obj.address;
+      queueProtocolCommand(obj, true);
       break;
     case iec104_class::C_SE_TC_1: // set-point short floating point command with
                                   // time tag
@@ -538,24 +591,21 @@ void MainWindow::slot_I104M_ready_to_read() {
               double(pmsg->setpoint));
       I104M_Loga(buf);
       obj.value = pmsg->setpoint;
-      queueProtocolCommand(obj);
-      LastCommandAddress = obj.address;
+      queueProtocolCommand(obj, true);
       break;
     case iec104_class::C_RC_TA_1: // regulating step command with time tag
     case iec104_class::C_RC_NA_1: // regulating step command
       sprintf(buf, "R--> I104M: regulating step command %s", pmsg->setpoint==0?"LOWER":"RAISE");
       I104M_Loga(buf);
       obj.rcs = pmsg->setpoint==0?1:2;
-      queueProtocolCommand(obj);
-      LastCommandAddress = obj.address;
+      queueProtocolCommand(obj, true);
       break;
     case iec104_class::C_BO_TA_1: // bitstring command with time tag
     case iec104_class::C_BO_NA_1: // bitstring command
       sprintf(buf, "R--> I104M: bitstring command %u", pmsg->setpoint_i32);
       I104M_Loga(buf);
       obj.value = pmsg->setpoint_i32;
-      queueProtocolCommand(obj);
-      LastCommandAddress = obj.address;
+      queueProtocolCommand(obj, true);
       break;
     }
   }
@@ -715,7 +765,6 @@ void MainWindow::on_pbSendCommandsButton_clicked() {
   obj.se = static_cast<unsigned char>(ui->cbSBO->isChecked());
 
   queueProtocolCommand(obj);
-  LastCommandAddress = obj.address;
 }
 
 void MainWindow::I104M_Loga(QString str, int id) {
@@ -1070,7 +1119,7 @@ void MainWindow::slot_tcpconnect(const QString& peerAddress) {
   ui->leIPRemoto->setText(peerAddress);
   ui->lbStatus->setText("<font color='green'> TCP CONNECTED!</font>");
   ui->pbGI->setEnabled(true);
-  ui->pbSendCommandsButton->setEnabled(true);
+  ui->pbSendCommandsButton->setEnabled(SendCommands != 0);
   ui->pbConnect->setText("Disconnect");
 }
 
@@ -1086,6 +1135,7 @@ void MainWindow::slot_tcpdisconnect() {
   }
 
   ui->lbStatus->setText("<font color='red'> TCP DISCONNECTED!</font>");
+  LastCommand.active = false; // responses from a previous connection don't count
   ui->pbGI->setEnabled(false);
   ui->pbSendCommandsButton->setEnabled(false);
 
@@ -1271,93 +1321,123 @@ void MainWindow::slot_commandActRespIndication(const iec_obj& obj) {
     mapPtItem_ColTimeTag[std::make_pair(obj.ca, obj.address)]->setText(buftt);
   }
 
-  bool is_select = false;
+  if (!commandResponseMatches(obj))
+    return;
 
-  if (obj.cause == iec104_class::REQUEST ||
-      obj.cause == iec104_class::ACTIVATION ||
-      obj.cause == iec104_class::ACTCONFIRM)
-    if (LastCommandAddress == obj.address) {
-      i104->mLog.pushMsg("     COMMAND CONF INDICATION");
-      is_select = (obj.se == iec104_class::SELECT);
+  i104->mLog.pushMsg("     COMMAND CONF INDICATION");
+  const bool is_select = (obj.se == iec104_class::SELECT);
 
-      // if confirmed select, execute
-      if (is_select && obj.pn == iec104_class::POSITIVE) {
-        // if defined ASDU address on UI, use it
-        // else will set to zero and use slave address (send Command will
-        // substitute zero to slave address)
-        iec_obj executeObj = obj;
-        executeObj.ca = ui->leASDUAddr->text().toUShort();
+  if (is_select) {
+    // only the activation confirmation of the select that is pending (same
+    // value, still a select) may trigger the execute, and only once
+    if (obj.cause != iec104_class::ACTCONFIRM ||
+        LastCommand.cmd.se != iec104_class::SELECT)
+      return;
+    if (obj.pn == iec104_class::POSITIVE) {
+      if (sameCommandValue(obj, LastCommand.cmd)) {
+        iec_obj executeObj = LastCommand.cmd;
         executeObj.se = iec104_class::EXECUTE;
-        queueProtocolCommand(executeObj);
+        queueProtocolCommand(executeObj, LastCommand.fromI104M);
+      } else {
+        i104->mLog.pushMsg("     SELECT CONFIRMATION VALUE MISMATCH, NOT EXECUTED");
+        LastCommand.active = false;
       }
-
-      // respond to I104M only if it's not a select or if its a negative
-      // response
-      if ((is_select == false || obj.pn == iec104_class::NEGATIVE) &&
-          EnableI104M && udps != nullptr) {
-        t_msgsup I104M_msg;
-        I104M_msg.signature = MSGSUP_SIG;
-        I104M_msg.tipo = obj.type;
-        I104M_msg.endereco = obj.address;
-        I104M_msg.sec = obj.ca;
-        I104M_msg.prim = unsigned(PrimaryAddress);
-        // mask cause, and p/n result to bit 6 1=NEG 0=POS
-        I104M_msg.causa = unsigned(
-            obj.cause | (((obj.pn == iec104_class::NEGATIVE) ? 1 : 0) << 6));
-
-        switch (obj.type) {
-        case iec104_class::C_SC_NA_1:
-        case iec104_class::C_SC_TA_1:
-          I104M_msg.taminfo = 1;
-          I104M_msg.info[0] = obj.scs;
-          break;
-        case iec104_class::C_DC_NA_1:
-        case iec104_class::C_DC_TA_1:
-          I104M_msg.taminfo = 1;
-          I104M_msg.info[0] = obj.dcs;
-          break;
-        case iec104_class::C_RC_NA_1:
-        case iec104_class::C_RC_TA_1:
-          I104M_msg.taminfo = 1;
-          I104M_msg.info[0] = obj.rcs;
-          break;
-        case iec104_class::C_SE_NA_1:
-        case iec104_class::C_SE_TA_1:
-          I104M_msg.taminfo = 4;
-          *(reinterpret_cast<float *>(&I104M_msg.info)) = obj.value;
-          break;
-
-        case iec104_class::C_SE_NB_1:
-        case iec104_class::C_SE_TB_1:
-          I104M_msg.taminfo = 4;
-          *(reinterpret_cast<float *>(&I104M_msg.info)) = obj.value;
-          break;
-
-        case iec104_class::C_SE_NC_1:
-        case iec104_class::C_SE_TC_1:
-          I104M_msg.taminfo = 4;
-          *(reinterpret_cast<float *>(&I104M_msg.info)) = obj.value;
-          break;
-
-        case iec104_class::C_BO_NA_1:
-        case iec104_class::C_BO_TA_1:
-          I104M_msg.taminfo = 4;
-          *(reinterpret_cast<uint32_t *>(&I104M_msg.info)) =
-              uint32_t(obj.value);
-          break;
-        }
-        if (obj.pn == iec104_class::NEGATIVE) {
-          I104M_Loga("T<-- I104M: COMMAND REJECTED BY IEC104 SLAVE");
-        } else {
-          I104M_Loga("T<-- I104M: COMMAND ACCEPTED BY IEC104 SLAVE");
-        }
-        udps->writeDatagram(reinterpret_cast<char *>(&I104M_msg),
-                            sizeof(I104M_msg), I104M_host, I104M_porta);
-        if (I104M_HaveDualHost())
-          udps->writeDatagram(reinterpret_cast<char *>(&I104M_msg),
-                              sizeof(I104M_msg), I104M_host_dual, I104M_porta);
-      }
+      return;
     }
+    // negative select confirmation: report it below
+    LastCommand.active = false;
+  } else if (obj.cause == iec104_class::ACTTERM) {
+    LastCommand.active = false;
+    return;
+  } else if (obj.cause != iec104_class::REQUEST &&
+             obj.cause != iec104_class::ACTIVATION &&
+             obj.cause != iec104_class::ACTCONFIRM) {
+    return;
+  }
+
+  if (obj.pn == iec104_class::NEGATIVE) {
+    I104M_Loga("T<-- I104M: COMMAND REJECTED BY IEC104 SLAVE");
+  } else {
+    I104M_Loga("T<-- I104M: COMMAND ACCEPTED BY IEC104 SLAVE");
+  }
+  sendI104MCommandResponse(obj);
+}
+
+// command not transmitted (commands disabled, link not ready or type not
+// supported): tell OSHMI it failed instead of leaving it waiting
+void MainWindow::slot_commandRejected(const iec_obj& obj) {
+  const bool wasPending = LastCommand.active &&
+                          LastCommand.cmd.type == obj.type &&
+                          LastCommand.cmd.address == obj.address;
+  const bool fromI104M = wasPending && LastCommand.fromI104M;
+  if (wasPending)
+    LastCommand.active = false;
+  if (!fromI104M)
+    return;
+
+  iec_obj resp = obj;
+  resp.cause = iec104_class::ACTCONFIRM;
+  resp.pn = iec104_class::NEGATIVE;
+  I104M_Loga("T<-- I104M: COMMAND NOT SENT TO IEC104 SLAVE");
+  sendI104MCommandResponse(resp);
+}
+
+void MainWindow::sendI104MCommandResponse(const iec_obj& obj) {
+  if (!EnableI104M || udps == nullptr)
+    return;
+
+  t_msgsup I104M_msg = {}; // zeroed: the whole struct goes on the wire
+  I104M_msg.signature = MSGSUP_SIG;
+  I104M_msg.tipo = obj.type;
+  I104M_msg.endereco = obj.address;
+  I104M_msg.sec = obj.ca;
+  I104M_msg.prim = unsigned(PrimaryAddress);
+  // mask cause, and p/n result to bit 6 1=NEG 0=POS
+  I104M_msg.causa = unsigned(
+      obj.cause | (((obj.pn == iec104_class::NEGATIVE) ? 1 : 0) << 6));
+
+  switch (obj.type) {
+  case iec104_class::C_SC_NA_1:
+  case iec104_class::C_SC_TA_1:
+    I104M_msg.taminfo = 1;
+    I104M_msg.info[0] = obj.scs;
+    break;
+  case iec104_class::C_DC_NA_1:
+  case iec104_class::C_DC_TA_1:
+    I104M_msg.taminfo = 1;
+    I104M_msg.info[0] = obj.dcs;
+    break;
+  case iec104_class::C_RC_NA_1:
+  case iec104_class::C_RC_TA_1:
+    I104M_msg.taminfo = 1;
+    I104M_msg.info[0] = obj.rcs;
+    break;
+  case iec104_class::C_SE_NA_1:
+  case iec104_class::C_SE_TA_1:
+  case iec104_class::C_SE_NB_1:
+  case iec104_class::C_SE_TB_1:
+  case iec104_class::C_SE_NC_1:
+  case iec104_class::C_SE_TC_1: {
+    I104M_msg.taminfo = 4;
+    const float value = float(obj.value);
+    memcpy(I104M_msg.info, &value, sizeof(value));
+  } break;
+  case iec104_class::C_BO_NA_1:
+  case iec104_class::C_BO_TA_1: {
+    I104M_msg.taminfo = 4;
+    const uint32_t value = uint32_t(obj.value);
+    memcpy(I104M_msg.info, &value, sizeof(value));
+  } break;
+  default:
+    I104M_msg.taminfo = 0; // no payload for other types
+    break;
+  }
+
+  udps->writeDatagram(reinterpret_cast<char *>(&I104M_msg),
+                      sizeof(I104M_msg), I104M_host, I104M_porta);
+  if (I104M_HaveDualHost())
+    udps->writeDatagram(reinterpret_cast<char *>(&I104M_msg),
+                        sizeof(I104M_msg), I104M_host_dual, I104M_porta);
 }
 
 void MainWindow::closeEvent(QCloseEvent *event) {

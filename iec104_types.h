@@ -502,6 +502,17 @@ struct iec_type60 {
   cp56time2a time;
 };
 
+// C_BO_NA_1 - Bitstring of 32 bit command
+struct iec_type51 {
+  uint32_t bsi; // binary state information
+};
+
+// C_BO_TA_1 - Bitstring of 32 bit command with time tag CP56Time2a
+struct iec_type64 {
+  uint32_t bsi; // binary state information
+  cp56time2a time;
+};
+
 struct iec_type100 {
   uint8_t qoi; // pointer of interrogation
 };
@@ -906,6 +917,18 @@ struct iec_apdu {
       uint8_t ioa8;
       iec_type60 obj;
     } nsq60;
+
+    struct {
+      uint16_t ioa16;
+      uint8_t ioa8;
+      iec_type51 obj;
+    } nsq51;
+
+    struct {
+      uint16_t ioa16;
+      uint8_t ioa8;
+      iec_type64 obj;
+    } nsq64;
 
     struct {
       uint16_t ioa16;

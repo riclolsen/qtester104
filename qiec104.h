@@ -46,12 +46,16 @@ class QIec104 : public QObject, public iec104_class {
 public:
   explicit QIec104(QObject *parent = 0);
   ~QIec104();
-  int SendCommands;    // 1 = allow sending commands, 0 = don't send commands
   int ForcePrimary;    // 1 = force primary (cant't stay secondary) , 0 = can be
                        // secondary
   QTimer *tmKeepAlive; // 1 second timer
   QSslSocket *tcps;    // socket for iec104 (tcp)
   void terminate();
+  // stop the worker and push it (with its timers and socket) to targetThread;
+  // must run in the worker's own thread, so it can be deleted from there
+  void shutdownAndMoveTo(QThread *targetThread);
+  // send a command, emitting signal_commandRejected if it couldn't be sent
+  void sendCommandOrReject(iec_obj obj);
   void disable_connect();
   void enable_connect();
   // TLS Configuration Setters
@@ -68,6 +72,7 @@ signals:
   void signal_tcp_connect(const QString &peerAddress);
   void signal_tcp_disconnect();
   void signal_commandActRespIndication(const iec_obj &obj);
+  void signal_commandRejected(const iec_obj &obj);
 
 public slots:
   void slot_tcpdisconnect(); // tcp disconnect for iec104
@@ -108,6 +113,10 @@ private:
   QString mLocalCertPath;
   QString mPrivateKeyPath;
   QSslSocket::PeerVerifyMode mVerifyMode = QSslSocket::VerifyNone; // Default to no verification for ease of testing initially
+  bool verifiesPeer() const {
+    return mVerifyMode == QSslSocket::VerifyPeer ||
+           mVerifyMode == QSslSocket::AutoVerifyPeer;
+  }
 };
 
 #endif // QIEC104_H

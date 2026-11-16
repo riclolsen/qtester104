@@ -482,14 +482,13 @@ void iec104_class::packetReadyTCP() {
     }
 
     // read the remaining of the apdu, resuming from rxBytes when the previous
-    // read left the apdu incomplete (broken_msg)
-    waitBytes(len - rxBytes, 500);
+    // read left the apdu incomplete (broken_msg). Don't block waiting for the
+    // rest: the next readyRead resumes the apdu, so timers and queued commands
+    // keep running in the meantime.
     bytesrec = readTCP(reinterpret_cast<char*>(br + 2 + rxBytes), len - rxBytes);
     if (bytesrec > 0)
       rxBytes += bytesrec;
     if (rxBytes < len) {
-      sprintf(buflog, "R--> Broken apdu (%d of %d bytes), waiting for the rest...", rxBytes, len);
-      mLog.pushMsg(buflog);
       broken_msg = true;
       return;
     }
@@ -588,7 +587,7 @@ void iec104_class::LogPoint(char* buf, int address, double val, char* qualifier,
 }
 
 // size in bytes of the information element of monitored (multi-object) ASDU
-// types, not counting the 3 byte object address; -1 = not length-checked
+// types, not counting the 3 byte object address; -1 = not a monitored type
 static int infoElementSize(unsigned char type) {
   switch (type) {
     case iec104_class::M_SP_NA_1: return 1;
@@ -612,6 +611,37 @@ static int infoElementSize(unsigned char type) {
     case iec104_class::M_EP_TD_1: return 10;
     case iec104_class::M_EP_TE_1: return 11;
     case iec104_class::M_EP_TF_1: return 11;
+    default: return -1;
+  }
+}
+
+// size in bytes of the single information object (3 byte object address
+// included) carried by control/command direction ASDU types that this class
+// parses; -1 = no object is read from the apdu for this type
+static int singleObjectSize(unsigned char type) {
+  switch (type) {
+    case iec104_class::C_SC_NA_1: return 3 + 1;
+    case iec104_class::C_DC_NA_1: return 3 + 1;
+    case iec104_class::C_RC_NA_1: return 3 + 1;
+    case iec104_class::C_SE_NA_1: return 3 + 3;
+    case iec104_class::C_SE_NB_1: return 3 + 3;
+    case iec104_class::C_SE_NC_1: return 3 + 5;
+    case iec104_class::C_BO_NA_1: return 3 + 4;
+    case iec104_class::C_SC_TA_1: return 3 + 1 + 7;
+    case iec104_class::C_DC_TA_1: return 3 + 1 + 7;
+    case iec104_class::C_RC_TA_1: return 3 + 1 + 7;
+    case iec104_class::C_SE_TA_1: return 3 + 3 + 7;
+    case iec104_class::C_SE_TB_1: return 3 + 3 + 7;
+    case iec104_class::C_SE_TC_1: return 3 + 5 + 7;
+    case iec104_class::C_BO_TA_1: return 3 + 4 + 7;
+    case iec104_class::C_CI_NA_1: return 3 + 1;
+    case iec104_class::C_RD_NA_1: return 3;
+    case iec104_class::C_CS_NA_1: return 3 + 7;
+    case iec104_class::C_TS_TA_1: return 3 + 2 + 7;
+    case iec104_class::P_ME_NA_1: return 3 + 3;
+    case iec104_class::P_ME_NB_1: return 3 + 3;
+    case iec104_class::P_ME_NC_1: return 3 + 5;
+    case iec104_class::P_AC_NA_1: return 3 + 1;
     default: return -1;
   }
 }
@@ -697,8 +727,11 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
     if (accountandrespond) {
       VR_NEW = (papdu->NS & 0xFFFE);
 
-      // if (VR_NEW != VR) {
-      if (VR_NEW != VR && VR_NEW != 2) { //  Allow initial I-frame from Slave with TX=1
+      // Allow only the first I-frame of the connection to start at N(S)=1
+      // (some slaves do that); any other mismatch, including a repeated
+      // N(S)=1 later on, is a sequence error.
+      const bool initialFrameCompat = (VR == 0 && VR_NEW == 2);
+      if (VR_NEW != VR && !initialFrameCompat) {
         // sequence error, must close and reopen connection
         mLog.pushMsg("*** SEQUENCE ERROR! **************************");
         if (seq_order_check) {
@@ -731,10 +764,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
 
     // validate that the declared number of objects fits inside the received
     // apdu, avoiding reads beyond the receive buffer on malformed frames
+    // (the receive buffer persists across frames, so a short frame would
+    // otherwise be parsed with stale bytes from a previous apdu)
     bool valid_length = true;
+    const int available = sz - 12; // minus start+length+NS+NR and asdu header
     const int objsz = infoElementSize(papdu->asduh.type);
-    if (objsz > 0) {
-      const int available = sz - 12; // minus start+length+NS+NR and asdu header
+    const int cmdsz = singleObjectSize(papdu->asduh.type);
+    if (available < 0) {
+      mLog.pushMsg("R--> ERROR: APDU TOO SHORT FOR ASDU HEADER, IGNORING");
+      valid_length = false;
+    } else if (objsz > 0) {
       const int needed = papdu->asduh.sq
                              ? 3 + int(papdu->asduh.num) * objsz
                              : int(papdu->asduh.num) * (3 + objsz);
@@ -742,6 +781,9 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         mLog.pushMsg("R--> ERROR: OBJECT COUNT EXCEEDS APDU SIZE, IGNORING ASDU");
         valid_length = false;
       }
+    } else if (cmdsz > 0 && cmdsz > available) {
+      mLog.pushMsg("R--> ERROR: ASDU SHORTER THAN ITS INFORMATION OBJECT, IGNORING");
+      valid_length = false;
     }
 
     if (valid_length)
@@ -1975,6 +2017,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         iec_obj iobj = {};
         iobj.address = papdu->nsq58.ioa16 + (unsigned(papdu->nsq58.ioa8) << 16);
         iobj.ca = papdu->asduh.ca;
+        iobj.timetag = pobj->time;
         iobj.cause = papdu->asduh.cause;
         iobj.pn = papdu->asduh.pn;
         iobj.test = papdu->asduh.t;
@@ -2015,6 +2058,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         iec_obj iobj = {};
         iobj.address = papdu->nsq59.ioa16 + (unsigned(papdu->nsq59.ioa8) << 16);
         iobj.ca = papdu->asduh.ca;
+        iobj.timetag = pobj->time;
         iobj.cause = papdu->asduh.cause;
         iobj.pn = papdu->asduh.pn;
         iobj.test = papdu->asduh.t;
@@ -2055,6 +2099,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         iec_obj iobj = {};
         iobj.address = papdu->nsq60.ioa16 + (unsigned(papdu->nsq60.ioa8) << 16);
         iobj.ca = papdu->asduh.ca;
+        iobj.timetag = pobj->time;
         iobj.cause = papdu->asduh.cause;
         iobj.pn = papdu->asduh.pn;
         iobj.test = papdu->asduh.t;
@@ -2135,6 +2180,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         iec_obj iobj = {};
         iobj.address = papdu->nsq61.ioa16 + (unsigned(papdu->nsq61.ioa8) << 16);
         iobj.ca = papdu->asduh.ca;
+        iobj.timetag = pobj->time;
         iobj.cause = papdu->asduh.cause;
         iobj.pn = papdu->asduh.pn;
         iobj.test = papdu->asduh.t;
@@ -2215,6 +2261,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         iec_obj iobj = {};
         iobj.address = papdu->nsq62.ioa16 + (unsigned(papdu->nsq62.ioa8) << 16);
         iobj.ca = papdu->asduh.ca;
+        iobj.timetag = pobj->time;
         iobj.cause = papdu->asduh.cause;
         iobj.pn = papdu->asduh.pn;
         iobj.test = papdu->asduh.t;
@@ -2296,6 +2343,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         iec_obj iobj = {};
         iobj.address = papdu->nsq63.ioa16 + (unsigned(papdu->nsq63.ioa8) << 16);
         iobj.ca = papdu->asduh.ca;
+        iobj.timetag = pobj->time;
         iobj.cause = papdu->asduh.cause;
         iobj.pn = papdu->asduh.pn;
         iobj.test = papdu->asduh.t;
@@ -2303,6 +2351,48 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
         iobj.qu = 0;
         iobj.se = pobj->se;
         iobj.value = pobj->r32;
+        commandActRespIndication(&iobj);
+      }
+      break;
+      case C_BO_NA_1:   // BITSTRING COMMAND
+      case C_BO_TA_1: { // BITSTRING COMMAND WITH TIME
+        const bool withTime = (papdu->asduh.type == C_BO_TA_1);
+        const unsigned addr = withTime
+            ? papdu->nsq64.ioa16 + (unsigned(papdu->nsq64.ioa8) << 16)
+            : papdu->nsq51.ioa16 + (unsigned(papdu->nsq51.ioa8) << 16);
+        const uint32_t bsi = withTime ? papdu->nsq64.obj.bsi : papdu->nsq51.obj.bsi;
+
+        if (mLog.isLogging()) {
+          oss.str("");
+          oss << "     ";
+          if (papdu->asduh.cause == ACTCONFIRM)
+            oss << "ACTIVATION CONFIRMATION ";
+          else if (papdu->asduh.cause == ACTTERM)
+            oss << "ACTIVATION TERMINATION ";
+          if (papdu->asduh.pn == POSITIVE)
+            oss << "POSITIVE ";
+          else
+            oss << "NEGATIVE ";
+          oss << "BITSTRING COMMAND" << (withTime ? " W/TIME" : "")
+              << " ADDRESS " << addr
+              << " BSI " << bsi;
+          mLog.pushMsg(oss.str().c_str());
+        }
+
+        // send indication to user
+        iec_obj iobj = {};
+        iobj.address = addr;
+        iobj.ca = papdu->asduh.ca;
+        iobj.cause = papdu->asduh.cause;
+        iobj.pn = papdu->asduh.pn;
+        iobj.test = papdu->asduh.t;
+        iobj.type = papdu->asduh.type;
+        iobj.qu = 0;
+        iobj.se = 0;
+        iobj.bcr = bsi;
+        iobj.value = bsi;
+        if (withTime)
+          iobj.timetag = papdu->nsq64.obj.time;
         commandActRespIndication(&iobj);
       }
       break;
@@ -2620,11 +2710,24 @@ void iec104_class::sendSupervisory() {
   mLog.pushMsg(oss.str().c_str());
 }
 
+void iec104_class::setCommandsEnabled(bool enabled) {
+  commandsEnabled = enabled;
+}
+
 bool iec104_class::sendCommand(iec_obj* obj) {
   iec_apdu apducmd;
   time_t tm1 = time(nullptr);
   tm* agora = localtime(&tm1);
   stringstream oss;
+
+  if (!commandsEnabled) {
+    mLog.pushMsg("     COMMANDS NOT ALLOWED (ALLOW_COMMANDS=0), NOT SENT");
+    return false;
+  }
+  if (!connectedTCP || !TxOk) {
+    mLog.pushMsg("     LINK NOT READY (NO STARTDTCON), COMMAND NOT SENT");
+    return false;
+  }
 
   // C_RD_NA_1 (read command) is only valid with COT=REQUEST; every other
   // command type uses COT=ACTIVATION
@@ -3384,6 +3487,56 @@ bool iec104_class::sendCommand(iec_obj* obj) {
           << unsigned(obj->address);
       mLog.pushMsg(oss.str().c_str());
       break;
+    case C_BO_NA_1:
+    case C_BO_TA_1: {
+      const bool withTime = (obj->type == C_BO_TA_1);
+      const uint32_t bsi = static_cast<uint32_t>(obj->value);
+      apducmd.start = START;
+      apducmd.length = sizeof(apducmd.NS) + sizeof(apducmd.NR) + sizeof(apducmd.asduh) +
+                       (withTime ? sizeof(apducmd.nsq64) : sizeof(apducmd.nsq51));
+      apducmd.NS = VS;
+      apducmd.NR = VR;
+      apducmd.asduh.type = obj->type;
+      apducmd.asduh.num = 1;
+      apducmd.asduh.sq = 0;
+      apducmd.asduh.cause = obj->cause;
+      apducmd.asduh.t = 0;
+      apducmd.asduh.pn = 0;
+      apducmd.asduh.oa = masterAddress;
+      apducmd.asduh.ca = obj->ca;
+      if (withTime) {
+        apducmd.nsq64.ioa16 = obj->address & 0x0000FFFF;
+        apducmd.nsq64.ioa8 = static_cast<uint8_t>(obj->address >> 16);
+        apducmd.nsq64.obj.bsi = bsi;
+        apducmd.nsq64.obj.time.year = static_cast<uint8_t>(agora->tm_year % 100);
+        apducmd.nsq64.obj.time.month = static_cast<uint8_t>(agora->tm_mon + 1);
+        apducmd.nsq64.obj.time.mday = static_cast<uint8_t>(agora->tm_mday);
+        apducmd.nsq64.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
+        apducmd.nsq64.obj.time.min = static_cast<uint8_t>(agora->tm_min);
+        apducmd.nsq64.obj.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000);
+        apducmd.nsq64.obj.time.iv = 0;
+        apducmd.nsq64.obj.time.su = static_cast<uint8_t>(agora->tm_isdst);
+        apducmd.nsq64.obj.time.wday = static_cast<uint8_t>(agora->tm_wday);
+        apducmd.nsq64.obj.time.res1 = 0;
+        apducmd.nsq64.obj.time.res2 = 0;
+        apducmd.nsq64.obj.time.res3 = 0;
+        apducmd.nsq64.obj.time.res4 = 0;
+      } else {
+        apducmd.nsq51.ioa16 = obj->address & 0x0000FFFF;
+        apducmd.nsq51.ioa8 = static_cast<uint8_t>(obj->address >> 16);
+        apducmd.nsq51.obj.bsi = bsi;
+      }
+      sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
+      VS += 2;
+
+      oss.str("");
+      oss << "     BITSTRING COMMAND" << (withTime ? " W/TIME" : "")
+          << " ADDRESS " << unsigned(obj->address)
+          << " BSI " << bsi
+          << " CA " << obj->ca;
+      mLog.pushMsg(oss.str().c_str());
+    }
+    break;
     default:
       mLog.pushMsg("     COMMAND TYPE NOT IMPLEMENTED, NOT SENT");
       return false;

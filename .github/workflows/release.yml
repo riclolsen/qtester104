@@ -28,6 +28,8 @@ jobs:
           version: ${{ env.QT_VERSION }}
           arch: linux_gcc_64
           cache: true
+      - name: Install headless display
+        run: sudo apt-get update && sudo apt-get install -y xvfb xauth
       - name: Build
         run: |
           mkdir build
@@ -41,26 +43,37 @@ jobs:
           NO_STRIP: '1'
         run: |
           curl --fail --location --retry 3 -o linuxdeploy-x86_64.AppImage \
-            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage
           curl --fail --location --retry 3 -o linuxdeploy-plugin-qt-x86_64.AppImage \
-            https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+            https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-qt-x86_64.AppImage
+          sha256sum --check .github/packaging/linuxdeploy.sha256
           chmod +x linuxdeploy*.AppImage
           export QMAKE="$(command -v qmake)"
           ./linuxdeploy-x86_64.AppImage --appdir QTester104 \
             --executable build/QTester104 --plugin qt \
             --desktop-file .github/packaging/QTester104.desktop \
             --icon-file .github/packaging/QTester104.svg
+          # Avoid launching through a root-level executable symlink: Qt must
+          # resolve its configuration relative to usr/bin on every supported version.
+          rm -f QTester104/AppRun
+          install -m 755 .github/packaging/AppRun QTester104/AppRun
           cp qtester104.ini QTester104/usr/bin/
           cp readme.txt License-gpl-3.0.txt QTester104/
           test -x QTester104/AppRun
           test -f QTester104/usr/plugins/tls/libqopensslbackend.so
           mkdir dist
           tar -czf dist/QTester104-linux-x86_64.tar.gz QTester104
+      - name: Test extracted Linux package
+        run: |
+          mkdir smoke-package
+          tar -xzf dist/QTester104-linux-x86_64.tar.gz -C smoke-package
+          xvfb-run -a python3 .github/packaging/smoke-test.py smoke-package/QTester104/AppRun
       - uses: actions/upload-artifact@v4
         with:
           name: linux-binaries
           path: dist/*
           if-no-files-found: error
+          compression-level: 0
 
   windows:
     name: Windows x64
@@ -93,13 +106,25 @@ jobs:
           windeployqt --release --compiler-runtime --dir package package\QTester104.exe
           if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
           if (!(Test-Path package\tls\qschannelbackend.dll)) { throw "Missing Windows TLS backend" }
+          if (!(Test-Path package\vc_redist.x64.exe)) { throw "Missing MSVC runtime installer" }
+          Copy-Item .github\packaging\WINDOWS-README.txt package\README-FIRST.txt
           Copy-Item qtester104.ini, readme.txt, License-gpl-3.0.txt package\
           Compress-Archive -Path package\* -DestinationPath dist\QTester104-windows-x64.zip
+      - name: Test extracted Windows package
+        shell: pwsh
+        run: |
+          Expand-Archive dist\QTester104-windows-x64.zip smoke-package
+          $installer = Start-Process -FilePath "$PWD\smoke-package\vc_redist.x64.exe" -ArgumentList '/install', '/quiet', '/norestart' -Wait -PassThru
+          # 1638 means a newer runtime is already installed; 3010 means reboot requested.
+          if ($installer.ExitCode -notin @(0, 1638, 3010)) { throw "MSVC runtime installation failed: $($installer.ExitCode)" }
+          python .github/packaging/smoke-test.py smoke-package/QTester104.exe
+          if ($LASTEXITCODE -ne 0) { throw "Package startup test failed" }
       - uses: actions/upload-artifact@v4
         with:
           name: windows-binaries
           path: dist/*
           if-no-files-found: error
+          compression-level: 0
 
   release:
     name: Publish release
@@ -121,8 +146,18 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           cd dist
-          sha256sum QTester104-* > SHA256SUMS.txt
+          sha256sum QTester104-linux-x86_64.tar.gz QTester104-windows-x64.zip > SHA256SUMS.txt
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
+            gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes --draft
           fi
-          gh release upload "$TAG" QTester104-* SHA256SUMS.txt --clobber
+          gh release upload "$TAG" QTester104-linux-x86_64.tar.gz QTester104-windows-x64.zip SHA256SUMS.txt --clobber
+          # Verify the uploaded bytes before publishing a new or retried draft.
+          verify_dir="$(mktemp -d)"
+          gh release download "$TAG" --dir "$verify_dir" \
+            --pattern QTester104-linux-x86_64.tar.gz \
+            --pattern QTester104-windows-x64.zip --pattern SHA256SUMS.txt
+          cmp SHA256SUMS.txt "$verify_dir/SHA256SUMS.txt"
+          (cd "$verify_dir" && sha256sum --check SHA256SUMS.txt)
+          if [ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" = true ]; then
+            gh release edit "$TAG" --draft=false
+          fi

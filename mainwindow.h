@@ -35,6 +35,7 @@
 #include <QtWidgets/QLineEdit>
 #include <QtWidgets/QTextBrowser>
 #include <QtWidgets/QPushButton>
+#include <QElapsedTimer>
 #include <QQueue>
 #include <QThread>
 #include <QTimer>
@@ -82,6 +83,7 @@ class MainWindow : public QMainWindow {
   void slot_tcpconnect(const QString& peerAddress); // tcp connect for iec104
   void slot_tcpdisconnect();      // tcp disconnect for iec104
   void slot_commandActRespIndication(const iec_obj& obj);
+  void slot_commandRejected(const iec_obj& obj);
 
   void on_pbCopyClipb_clicked(); // copy log messages to clipboard
   void on_pbCopyVals_clicked(); // copy values table to clipboard
@@ -92,7 +94,9 @@ class MainWindow : public QMainWindow {
 
   private:
   void queueProtocolCall(const std::function<void(QIec104*)>& fn);
-  void queueProtocolCommand(const iec_obj& obj);
+  void queueProtocolCommand(const iec_obj& obj, bool fromI104M = false);
+  bool commandResponseMatches(const iec_obj& resp) const;
+  void sendI104MCommandResponse(const iec_obj& obj);
   void processDataIndicationBatch(const QVector<iec_obj>& objects);
   void shutdownProtocolThread();
 
@@ -116,7 +120,16 @@ class MainWindow : public QMainWindow {
   bool pointTableResizePending;
   int logTickCount;
 
-  unsigned LastCommandAddress;
+  // last command sent, used to pair slave responses with it (select before
+  // operate executes only on the confirmation of this exact transaction)
+  struct SentCommand {
+    bool active = false;
+    bool fromI104M = false;
+    iec_obj cmd{};
+    QElapsedTimer sentAt;
+  };
+  SentCommand LastCommand;
+  static constexpr qint64 CommandResponseTimeoutMs = 30000;
   int SendCommands;             // 1 = allow sending commands, 0 = don't send commands
   int Hide;
   int PrimaryAddress;

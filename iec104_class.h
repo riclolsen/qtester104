@@ -219,6 +219,8 @@ public:
   int getPrimaryAddress();
   void disableSequenceOrderCheck(); // allow sequence out of order
   bool sendCommand(iec_obj *obj);   // Command, return false if not send
+  void setCommandsEnabled(bool enabled); // ALLOW_COMMANDS: false blocks sendCommand
+  bool isReadyToTransmit() const { return connectedTCP && TxOk; }
   int getPortTCP();
   void setPortTCP(unsigned port);
   void setGIPeriod(unsigned period);
@@ -261,6 +263,7 @@ private:
   static const int gi_retry_time =
       45; // wait time to retry when requested a GI and not responded
   unsigned short test_command_count = 0; // test command counter
+  bool commandsEnabled = true; // when false, sendCommand refuses to transmit
 
 protected:
   void LogFrame(char *frame, int size, bool is_send);

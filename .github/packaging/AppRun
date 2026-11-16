@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+app_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+# Use the real executable path so Qt finds usr/bin/qt.conf consistently.
+exec "$app_dir/usr/bin/QTester104" "$@"

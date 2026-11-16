@@ -39,7 +39,6 @@ QIec104::QIec104(QObject *parent) : QObject(parent) {
   mAllowConnect = true;
   mConnectAttemptCounter = 0;
   mKeepAliveCounter = 1;
-  SendCommands = 0;
   ForcePrimary = 0;
   mLog.activateLog();
   mLog.doLogTime();
@@ -194,7 +193,7 @@ void QIec104::connectTCP() {
           // would leak this tab's TLS settings into the other RTU tabs
           tcps->setSslConfiguration(sslConfig);
           tcps->setPeerVerifyMode(mVerifyMode); // Set verification mode
-          if (mVerifyMode > 1) {
+          if (verifiesPeer()) {
               mLog.pushMsg("Verifying peer certificate: true");
           } else {
               mLog.pushMsg("Verifying peer certificate: false");
@@ -311,6 +310,7 @@ void QIec104::commandActRespIndication(iec_obj *obj) {
 
 void QIec104::terminate() {
   mEnding = true;
+  tmKeepAlive->stop();
   tcps->abort();
   // tcpThread.quit();
   // tcpThread.wait(1000);
@@ -320,10 +320,18 @@ void QIec104::terminate() {
   //   tcpThread.wait(2000);
 }
 
-void QIec104::slot_tcpreadytoread() {
-  if (tcps->bytesAvailable() < 6)
-    tcps->waitForReadyRead(8);
+void QIec104::shutdownAndMoveTo(QThread *targetThread) {
+  terminate();
+  moveToThread(targetThread);
+}
 
+void QIec104::sendCommandOrReject(iec_obj obj) {
+  if (!sendCommand(&obj))
+    emit signal_commandRejected(obj);
+}
+
+void QIec104::slot_tcpreadytoread() {
+  // partial apdus are resumed on the next readyRead, no need to block here
   packetReadyTCP();
 }
 
@@ -339,18 +347,30 @@ int QIec104::bytesAvailableTCP() { return int(tcps->bytesAvailable()); }
 
 void QIec104::slot_sslErrors(const QList<QSslError> &errors) {
   QString errorStrings;
-  for (const QSslError &error : errors) {
+  for (const QSslError &error : errors)
       errorStrings += error.errorString() + "; ";
-      if (error.error() == QSslError::SelfSignedCertificate) {
-          mLog.pushMsg("Ignoring self-signed certificate error (for testing).");
-          tcps->ignoreSslErrors();
-      }
-  }
   mLog.pushMsg(QString("SSL Errors Encountered: %1")
                    .arg(errorStrings)
                    .toStdString()
                    .c_str());
-  // tcps->ignoreSslErrors();
+
+  if (verifiesPeer()) {
+      // peer verification requested: every error is fatal, the handshake
+      // is aborted by Qt since nothing is ignored here
+      mLog.pushMsg("Peer verification failed, rejecting the connection.");
+      return;
+  }
+
+  // verification disabled (testing): accept only self-signed certificates
+  QList<QSslError> ignorable;
+  for (const QSslError &error : errors)
+      if (error.error() == QSslError::SelfSignedCertificate ||
+          error.error() == QSslError::SelfSignedCertificateInChain)
+          ignorable.append(error);
+  if (ignorable.size() == errors.size()) {
+      mLog.pushMsg("Ignoring self-signed certificate error (verification disabled).");
+      tcps->ignoreSslErrors(ignorable);
+  }
 }
 
 void QIec104::slot_socketError(QAbstractSocket::SocketError) {
@@ -361,6 +381,11 @@ void QIec104::slot_socketEncrypted() { mLog.pushMsg("Encrypted slot!"); }
 
 void QIec104::slot_handshakeInterruptedOnError(const QSslError &) {
     mLog.pushMsg(tcps->errorString().toStdString().c_str());
+    if (verifiesPeer()) {
+        mLog.pushMsg("Handshake interrupted on a verification error, aborting.");
+        tcps->abort();
+        return;
+    }
     mLog.pushMsg("Handshake interrupted, trying to continue...");
     tcps->continueInterruptedHandshake();
 }
