@@ -78,7 +78,8 @@ class MainWindow : public QMainWindow {
   void slot_timer_I104M_kamsg(); // timer for sending keepalive I104M messages
   void slot_processPendingUiData();
   void slot_I104M_ready_to_read();  // I104M: slot to read data from OSHMI UDP
-  void slot_dataIndication(const QVector<iec_obj>& objects);
+  void slot_dataAvailable();
+  void slot_commandTimeout();
   void slot_interrogationActConfIndication();
   void slot_interrogationActTermIndication();
   void slot_tcpconnect(const QString& peerAddress); // tcp connect for iec104
@@ -95,7 +96,13 @@ class MainWindow : public QMainWindow {
 
   private:
   void queueProtocolCall(const std::function<void(QIec104*)>& fn);
-  void queueProtocolCommand(const iec_obj& obj, bool fromI104M = false);
+  void queueProtocolCommand(const iec_obj& obj, bool fromI104M = false,
+                            bool continuesTransaction = false);
+  bool commandPending() const;
+  void endCommand();
+  void reportCommandFailure(const iec_obj& obj, const char* why);
+  bool readCommandAddress(unsigned* address);
+  void processDataIndication(const QVector<iec_obj>& objects);
   bool commandResponseMatches(const iec_obj& resp) const;
   void sendI104MCommandResponse(const iec_obj& obj);
   // one table row per (common address, object address)
@@ -143,6 +150,7 @@ class MainWindow : public QMainWindow {
   };
   SentCommand LastCommand;
   static constexpr qint64 CommandResponseTimeoutMs = 30000;
+  QTimer* tmCommandTimeout = nullptr; // reports a command left unanswered
   int SendCommands;             // 1 = allow sending commands, 0 = don't send commands
   int Hide;
   int PrimaryAddress;

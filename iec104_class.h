@@ -261,6 +261,7 @@ private:
   static const int t2_supervisory = 8;
   static const int t1_startdtact = 15;
   int tout_ack = -1;      // t1 countdown waiting for the ack of sent I-frames
+  unsigned short ackedVS = 0; // N(S) acknowledged so far by the slave
   void startAckTimer();
   void ackReceived(unsigned short nr);
   bool checkReadyToTransmit(const char* what);
@@ -315,6 +316,8 @@ protected:
   virtual void interrogationActTermIndication() {}
   // inform user of command activation
   virtual void commandActRespIndication(iec_obj * /*obj*/) {}
+  // return false to pause reading received data (consumer backlog full)
+  virtual bool canAcceptData() { return true; }
   // user process APDU
   virtual void userprocAPDU(iec_apdu * /* papdu */, int /* sz */) {}
 

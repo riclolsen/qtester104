@@ -53,6 +53,11 @@ static tm localNow(int* msec) {
   return out;
 }
 
+// VTI step position value: 7 bit two's complement (-64..+63)
+static int stepValue(unsigned mv) {
+  return (mv & 0x40) ? int(mv) - 128 : int(mv);
+}
+
 // CP56Time2a day of week is 1=Monday..7=Sunday, tm_wday is 0=Sunday..6
 static uint8_t cp56WeekDay(const tm* t) {
   return static_cast<uint8_t>(t->tm_wday == 0 ? 7 : t->tm_wday);
@@ -285,6 +290,7 @@ void iec104_class::onConnectTCP() {
   VR = 0;
   test_command_count = 0;
   tout_ack = -1;
+  ackedVS = 0;
   broken_msg = false; // discard any partial apdu from a previous connection
   rxBytes = 0;
   startRx = false;
@@ -300,6 +306,7 @@ void iec104_class::onDisconnectTCP() {
   tout_testfr = -1;
   tout_testfr_con = -1;
   tout_ack = -1;
+  ackedVS = 0;
   broken_msg = false;
   rxBytes = 0;
   startRx = false;
@@ -384,9 +391,23 @@ void iec104_class::startAckTimer() {
 
 // N(R) from the slave acknowledges every I-frame sent before it
 void iec104_class::ackReceived(unsigned short nr) {
+  nr &= 0xFFFE;
+  // frames still unacknowledged, and how many this N(R) acknowledges
+  const unsigned short outstanding = static_cast<unsigned short>(VS - ackedVS);
+  const unsigned short advance = static_cast<unsigned short>(nr - ackedVS);
+  if (advance > outstanding) {
+    // acknowledges frames never sent: protocol error, close the connection
+    mLog.pushMsg("*** INVALID N(R) (ACKNOWLEDGES UNSENT FRAMES)!");
+    if (seq_order_check)
+      disconnectTCP();
+    return;
+  }
+  if (advance == 0)
+    return;                      // repeated ack: no progress, t1 keeps running
+  ackedVS = nr;
   if (nr == VS)
     tout_ack = -1;               // everything acknowledged
-  else if (tout_ack >= 0)
+  else
     tout_ack = t1_startdtact;    // progress, restart t1 for the rest
 }
 
@@ -522,6 +543,10 @@ void iec104_class::packetReadyTCP() {
   char buflog[10000];
 
   while (true) {
+    // consumer backlog full: leave the bytes in the socket so TCP flow
+    // control slows the slave down; the derived class resumes reading
+    if (!canAcceptData())
+      return;
 
     if (!broken_msg) {
       if (!startRx) {
@@ -731,6 +756,22 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
       tout_testfr = t3_testfr;  // restart the idle detection timer
   }
 
+  // control field format: I-frames (bit0 = 0) carry an ASDU, S/U-frames
+  // (bit0 = 1) never do; anything else is a framing error
+  const bool iFormat = (papdu->NS & 0x01) == 0;
+  if (sz > 6 && !iFormat) {
+    mLog.pushMsg("R--> ERROR: S/U FORMAT FRAME WITH DATA, CLOSING CONNECTION");
+    if (accountandrespond)
+      disconnectTCP();
+    return;
+  }
+  if (sz == 6 && iFormat) {
+    mLog.pushMsg("R--> ERROR: I FORMAT FRAME WITHOUT ASDU, CLOSING CONNECTION");
+    if (accountandrespond)
+      disconnectTCP();
+    return;
+  }
+
   if (sz == 6) {
     // Control messages
     if (accountandrespond)
@@ -811,24 +852,26 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
       ackReceived(papdu->NR);
     }
 
-    oss.str("");
-    oss << "     OA "
-        << unsigned(papdu->asduh.oa)
-        << " CA "
-        << unsigned(papdu->asduh.ca)
-        << " TI TYPE "
-        << unsigned(papdu->asduh.type) << ":" << asduTiStr(papdu->asduh.type)
-        << " CAUSE "
-        << int(papdu->asduh.cause) << ":" << causeStr(papdu->asduh.cause)
-        << " SQ "
-        << unsigned(papdu->asduh.sq)
-        << " ITEMS "
-        << unsigned(papdu->asduh.num)
-        << (papdu->asduh.pn == POSITIVE ? " POSITIVE" : " NEGATIVE")
-        << (papdu->asduh.t ? " TEST" : "");
+    if (mLog.isLogging()) {
+      oss.str("");
+      oss << "     OA "
+          << unsigned(papdu->asduh.oa)
+          << " CA "
+          << unsigned(papdu->asduh.ca)
+          << " TI TYPE "
+          << unsigned(papdu->asduh.type) << ":" << asduTiStr(papdu->asduh.type)
+          << " CAUSE "
+          << int(papdu->asduh.cause) << ":" << causeStr(papdu->asduh.cause)
+          << " SQ "
+          << unsigned(papdu->asduh.sq)
+          << " ITEMS "
+          << unsigned(papdu->asduh.num)
+          << (papdu->asduh.pn == POSITIVE ? " POSITIVE" : " NEGATIVE")
+          << (papdu->asduh.t ? " TEST" : "");
 
 
-    mLog.pushMsg(oss.str().c_str());
+      mLog.pushMsg(oss.str().c_str());
+    }
 
     // validate that the declared number of objects fits inside the received
     // apdu, avoiding reads beyond the receive buffer on malformed frames
@@ -840,6 +883,13 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
     const int cmdsz = singleObjectSize(papdu->asduh.type);
     if (available < 0) {
       mLog.pushMsg("R--> ERROR: APDU TOO SHORT FOR ASDU HEADER, IGNORING");
+      valid_length = false;
+    } else if (papdu->asduh.num == 0) {
+      mLog.pushMsg("R--> ERROR: ASDU WITH ZERO OBJECTS, IGNORING");
+      valid_length = false;
+    } else if (cmdsz > 0 && (papdu->asduh.num != 1 || papdu->asduh.sq)) {
+      // command direction types carry exactly one, not sequenced, object
+      mLog.pushMsg("R--> ERROR: COMMAND ASDU MUST HAVE ONE NON-SEQUENCED OBJECT, IGNORING");
       valid_length = false;
     } else if (objsz > 0) {
       const int needed = papdu->asduh.sq
@@ -973,7 +1023,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           piecarr[i].pn = papdu->asduh.pn;
           piecarr[i].test = papdu->asduh.t;
           piecarr[i].type = papdu->asduh.type;
-          piecarr[i].value = pobj->mv;
+          piecarr[i].value = stepValue(pobj->mv);
           piecarr[i].t = pobj->t;
           piecarr[i].ov = pobj->ov;
           piecarr[i].bl = pobj->bl;
@@ -1282,7 +1332,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           piecarr[i].pn = papdu->asduh.pn;
           piecarr[i].test = papdu->asduh.t;
           piecarr[i].type = papdu->asduh.type;
-          piecarr[i].value = pobj->mv;
+          piecarr[i].value = stepValue(pobj->mv);
           piecarr[i].t = pobj->t;
           piecarr[i].ov = pobj->ov;
           piecarr[i].bl = pobj->bl;
@@ -2816,6 +2866,14 @@ bool iec104_class::sendCommand(iec_obj* obj) {
   }
   if (!checkReadyToTransmit("COMMAND"))
     return false;
+  if (obj->address > 0xFFFFFF) {
+    // the information object address has 3 bytes: refuse instead of
+    // silently truncating it to another point
+    oss << "     INVALID OBJECT ADDRESS " << obj->address
+        << " (MAX 16777215), COMMAND NOT SENT";
+    mLog.pushMsg(oss.str().c_str());
+    return false;
+  }
 
   // C_RD_NA_1 (read command) is only valid with COT=REQUEST; every other
   // command type uses COT=ACTIVATION

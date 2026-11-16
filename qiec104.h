@@ -33,6 +33,7 @@
 #include <QObject>
 #include <QThread>
 #include <QTimer>
+#include <QMutex>
 #include <QSslSocket>
 #include <QSslError>
 #include <QString>
@@ -56,6 +57,9 @@ public:
   void shutdownAndMoveTo(QThread *targetThread);
   // send a command, emitting signal_commandRejected if it couldn't be sent
   void sendCommandOrReject(iec_obj obj);
+  // called from the GUI thread: takes all received data batches, in order
+  QVector<QVector<iec_obj>> takePendingData();
+  static constexpr qsizetype kMaxPendingObjects = 200000; // backlog limit
   void disable_connect();
   void enable_connect();
   // TLS Configuration Setters
@@ -67,7 +71,9 @@ public:
   void setPeerVerifyName(const QString &name); // expected certificate name
   
 signals:
-  void signal_dataIndication(const QVector<iec_obj> &objects);
+  // new data waiting in takePendingData(); emitted once until it is taken,
+  // so the GUI event queue never holds more than one data event per RTU
+  void signal_dataAvailable();
   void signal_interrogationActConfIndication();
   void signal_interrogationActTermIndication();
   void signal_tcp_connect(const QString &peerAddress);
@@ -88,6 +94,11 @@ private slots:
   void slot_socketEncrypted();
   void slot_handshakeInterruptedOnError(const QSslError &error);
 
+protected:
+  // data hand-off to the GUI thread (protected: exercised by the tests)
+  void dataIndicationBatch(QVector<iec_obj> &objects) override;
+  bool canAcceptData() override;
+
 private:
   // QThread tcpThread;
 
@@ -101,11 +112,18 @@ private:
   void interrogationActConfIndication();
   void interrogationActTermIndication();
   void commandActRespIndication(iec_obj *obj);
-  void dataIndicationBatch(QVector<iec_obj> &objects) override;
+  void resumeReading();
   bool mEnding;
   bool mAllowConnect;
   int mConnectAttemptCounter;
   unsigned int mKeepAliveCounter;
+
+  // received data handed to the GUI thread (guarded by mDataMutex)
+  QMutex mDataMutex;
+  QVector<QVector<iec_obj>> mPendingData;
+  qsizetype mPendingObjects = 0;
+  bool mNotifyPending = false; // signal_dataAvailable sent, data not yet taken
+  bool mReadPaused = false;    // reading stopped because the backlog is full
 
   // TLS Configuration Members
   bool mUseTls = false;

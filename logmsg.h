@@ -36,6 +36,7 @@
 #include <ctime>
 #include <list>
 #include <QMutex>
+#include <atomic>
 #include <string>
 
 class TLogMsg
@@ -60,7 +61,7 @@ private:
     mutable QMutex mMutex;
     unsigned int mMaxMsg;
     unsigned long mDropped; // messages discarded because the queue was full
-    bool mDoLog;
+    std::atomic<bool> mDoLog; // read lock-free by isLogging()
     bool mRegTime;
     time_t mLastTime; // time of the previously pulled message
     unsigned int mLevel; // exibition level 0=all, 1 an on, exibit more information progressively

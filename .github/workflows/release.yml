@@ -36,6 +36,15 @@ jobs:
           cd build
           qmake ../IEC104.pro CONFIG+=release CONFIG-=debug
           make -j"$(nproc)"
+      - name: Protocol tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          mkdir build-tests
+          cd build-tests
+          qmake ../tests/protocol_tests/protocol_tests.pro CONFIG+=release CONFIG-=debug
+          make -j"$(nproc)"
+          ./protocol_tests
       - name: Package with Qt runtime
         env:
           APPIMAGE_EXTRACT_AND_RUN: '1'

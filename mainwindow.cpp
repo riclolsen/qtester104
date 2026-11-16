@@ -64,17 +64,58 @@ public:
   }
 };
 
-static unsigned int parseIoa(const QString& str) {
-    if (str.contains('-') || str.contains('.')) {
-        QStringList parts = str.split(QRegularExpression("[-.]"));
-        if (parts.size() >= 3) {
-            unsigned int low = parts[0].toUInt();
-            unsigned int mid = parts[1].toUInt();
-            unsigned int high = parts[2].toUInt();
-            return low + (mid << 8) + (high << 16);
-        }
+// one byte of an 8-8-8 address; an empty field counts as 0
+static bool parseAddressByte(const QString& text, unsigned* out) {
+    const QString t = text.trimmed();
+    if (t.isEmpty()) {
+        *out = 0;
+        return true;
     }
-    return str.toUInt();
+    bool ok = false;
+    *out = t.toUInt(&ok);
+    return ok && *out <= 0xFF;
+}
+
+// information object address, plain ("1234") or 8-8-8 ("210-4-0"); it must
+// fit the protocol's 3 bytes, it's never truncated into another address
+static bool parseIoa(const QString& str, unsigned* out) {
+    const QString t = str.trimmed();
+    if (t.contains('-') || t.contains('.')) {
+        const QStringList parts = t.split(QRegularExpression("[-.]"));
+        unsigned low, mid, high;
+        if (parts.size() != 3 || !parseAddressByte(parts[0], &low) ||
+            !parseAddressByte(parts[1], &mid) || !parseAddressByte(parts[2], &high))
+            return false;
+        *out = low + (mid << 8) + (high << 16);
+        return true;
+    }
+    bool ok = false;
+    *out = t.toUInt(&ok);
+    return ok && *out <= 0xFFFFFF;
+}
+
+// command address from the UI fields; false (and logged) when empty or invalid
+bool MainWindow::readCommandAddress(unsigned* address) {
+    bool valid;
+    if (ui->cb888Mode->isChecked()) {
+        if (ui->leCmdAddressLow->text().trimmed().isEmpty() &&
+            ui->leCmdAddressMid->text().trimmed().isEmpty() &&
+            ui->leCmdAddressHigh->text().trimmed().isEmpty())
+            return false;
+        unsigned low, mid, high;
+        valid = parseAddressByte(ui->leCmdAddressLow->text(), &low) &&
+                parseAddressByte(ui->leCmdAddressMid->text(), &mid) &&
+                parseAddressByte(ui->leCmdAddressHigh->text(), &high);
+        if (valid)
+            *address = low + (mid << 8) + (high << 16);
+    } else {
+        if (ui->leCmdAddress->text().trimmed().isEmpty())
+            return false;
+        valid = parseIoa(ui->leCmdAddress->text(), address);
+    }
+    if (!valid)
+        i104->mLog.pushMsg("     INVALID COMMAND ADDRESS (0..16777215, OR 0..255 PER 8-8-8 BYTE), NOT SENT");
+    return valid;
 }
 
 void MainWindow::queueProtocolCall(const std::function<void(QIec104*)>& fn) {
@@ -84,17 +125,79 @@ void MainWindow::queueProtocolCall(const std::function<void(QIec104*)>& fn) {
       Qt::QueuedConnection);
 }
 
-void MainWindow::queueProtocolCommand(const iec_obj& obj, bool fromI104M) {
+// command types whose response is reported back (commandActRespIndication)
+// with the command's own object address, so a transaction can be tracked
+static bool tracksResponse(unsigned type) {
+  switch (type) {
+  case iec104_class::C_SC_NA_1: case iec104_class::C_SC_TA_1:
+  case iec104_class::C_DC_NA_1: case iec104_class::C_DC_TA_1:
+  case iec104_class::C_RC_NA_1: case iec104_class::C_RC_TA_1:
+  case iec104_class::C_SE_NA_1: case iec104_class::C_SE_TA_1:
+  case iec104_class::C_SE_NB_1: case iec104_class::C_SE_TB_1:
+  case iec104_class::C_SE_NC_1: case iec104_class::C_SE_TC_1:
+  case iec104_class::C_BO_NA_1: case iec104_class::C_BO_TA_1:
+  case iec104_class::C_RD_NA_1:
+  case iec104_class::P_ME_NA_1: case iec104_class::P_ME_NB_1:
+  case iec104_class::P_ME_NC_1: case iec104_class::P_AC_NA_1:
+    return true;
+  default:
+    return false;
+  }
+}
+
+bool MainWindow::commandPending() const {
+  return LastCommand.active &&
+         LastCommand.sentAt.elapsed() <= CommandResponseTimeoutMs;
+}
+
+// negative confirmation to OSHMI for a command it requested that did not
+// complete (not sent, busy, or no response in time)
+void MainWindow::reportCommandFailure(const iec_obj& obj, const char* why) {
+  iec_obj resp = obj;
+  resp.cause = iec104_class::ACTCONFIRM;
+  resp.pn = iec104_class::NEGATIVE;
+  I104M_Loga(QString("T<-- I104M: ") + why);
+  sendI104MCommandResponse(resp);
+}
+
+void MainWindow::endCommand() {
+  LastCommand.active = false;
+  tmCommandTimeout->stop();
+}
+
+void MainWindow::slot_commandTimeout() {
+  if (!LastCommand.active)
+    return;
+  LastCommand.active = false;
+  i104->mLog.pushMsg("     *** COMMAND TIMEOUT: NO RESPONSE FROM THE SLAVE");
+  if (LastCommand.fromI104M)
+    reportCommandFailure(LastCommand.cmd, "COMMAND TIMED OUT, NO RESPONSE FROM IEC104 SLAVE");
+}
+
+void MainWindow::queueProtocolCommand(const iec_obj& obj, bool fromI104M,
+                                      bool continuesTransaction) {
   iec_obj command = obj;
   // sendCommand() uses the link address when the common address is zero;
   // resolve it here so responses can be matched against the real address
   if (command.ca == 0)
     command.ca = static_cast<uint16_t>(SecondaryAddress);
 
-  LastCommand.active = true;
-  LastCommand.fromI104M = fromI104M;
-  LastCommand.cmd = command;
-  LastCommand.sentAt.start();
+  const bool tracked = tracksResponse(command.type);
+  if (tracked) {
+    // one command transaction at a time: a second one would replace the
+    // tracking of the first, losing its execute step or its OSHMI response
+    if (!continuesTransaction && commandPending()) {
+      i104->mLog.pushMsg("     ANOTHER COMMAND IS IN PROGRESS, NOT SENT");
+      if (fromI104M)
+        reportCommandFailure(command, "COMMAND REFUSED, ANOTHER COMMAND IN PROGRESS");
+      return;
+    }
+    LastCommand.active = true;
+    LastCommand.fromI104M = fromI104M;
+    LastCommand.cmd = command;
+    LastCommand.sentAt.start();
+    tmCommandTimeout->start(int(CommandResponseTimeoutMs));
+  }
 
   if (!SendCommands) {
     i104->mLog.pushMsg("     COMMANDS NOT ALLOWED (ALLOW_COMMANDS=0), NOT SENT");
@@ -111,8 +214,7 @@ void MainWindow::queueProtocolCommand(const iec_obj& obj, bool fromI104M) {
 // a response belongs to the last command only if it refers to the same
 // type, object and common address, and arrives before the timeout
 bool MainWindow::commandResponseMatches(const iec_obj& resp) const {
-  if (!LastCommand.active ||
-      LastCommand.sentAt.elapsed() > CommandResponseTimeoutMs)
+  if (!commandPending())
     return false;
   const iec_obj& cmd = LastCommand.cmd;
   return resp.type == cmd.type && resp.address == cmd.address &&
@@ -314,6 +416,9 @@ MainWindow::MainWindow(const QString& iniPath,
   tmLogMsg = new QTimer();
   tmUiDataPump = new QTimer();
   tmI104M_kamsg = new QTimer();
+  tmCommandTimeout = new QTimer(this);
+  tmCommandTimeout->setSingleShot(true);
+  connect(tmCommandTimeout, &QTimer::timeout, this, &MainWindow::slot_commandTimeout);
 
   i104->moveToThread(&protocolThread);
   protocolThread.start();
@@ -325,8 +430,8 @@ MainWindow::MainWindow(const QString& iniPath,
   connect(tmUiDataPump, SIGNAL(timeout()), this, SLOT(slot_processPendingUiData()));
   connect(tmI104M_kamsg, SIGNAL(timeout()), this,
           SLOT(slot_timer_I104M_kamsg()));
-  connect(i104, &QIec104::signal_dataIndication, this,
-          &MainWindow::slot_dataIndication);
+  connect(i104, &QIec104::signal_dataAvailable, this,
+          &MainWindow::slot_dataAvailable);
   connect(i104, &QIec104::signal_interrogationActConfIndication, this,
           &MainWindow::slot_interrogationActConfIndication);
   connect(i104, &QIec104::signal_interrogationActTermIndication, this,
@@ -627,13 +732,9 @@ void MainWindow::on_pbSendCommandsButton_clicked() {
           .toUInt());
 
   if (obj.type == iec104_class::C_RD_NA_1) {
-    if (ui->cb888Mode->isChecked()) {
-        if (ui->leCmdAddressLow->text().trimmed() == "" && ui->leCmdAddressMid->text().trimmed() == "" && ui->leCmdAddressHigh->text().trimmed() == "") return;
-        obj.address = ui->leCmdAddressLow->text().toUInt() + (ui->leCmdAddressMid->text().toUInt() << 8) + (ui->leCmdAddressHigh->text().toUInt() << 16);
-    } else {
-        if (ui->leCmdAddress->text().trimmed() == "") return;
-        obj.address = parseIoa(ui->leCmdAddress->text());
-    }
+    unsigned parsedAddr = 0;
+    if (!readCommandAddress(&parsedAddr)) return;
+    obj.address = parsedAddr;
     obj.value = 0;
   } else
     // reset process and interrogation must have value set (qrp) or (qoi)
@@ -650,14 +751,8 @@ void MainWindow::on_pbSendCommandsButton_clicked() {
       if (obj.type != iec104_class::C_CS_NA_1 &&
           obj.type != iec104_class::C_TS_TA_1) {
         if (ui->leCmdValue->text().trimmed() == "") return;
-        unsigned int parsedAddr = 0;
-        if (ui->cb888Mode->isChecked()) {
-            if (ui->leCmdAddressLow->text().trimmed() == "" && ui->leCmdAddressMid->text().trimmed() == "" && ui->leCmdAddressHigh->text().trimmed() == "") return;
-            parsedAddr = ui->leCmdAddressLow->text().toUInt() + (ui->leCmdAddressMid->text().toUInt() << 8) + (ui->leCmdAddressHigh->text().toUInt() << 16);
-        } else {
-            if (ui->leCmdAddress->text().trimmed() == "") return;
-            parsedAddr = parseIoa(ui->leCmdAddress->text());
-        }
+        unsigned parsedAddr = 0;
+        if (!readCommandAddress(&parsedAddr)) return;
         if (parsedAddr == 0) return;
 
         obj.address = parsedAddr;
@@ -780,7 +875,17 @@ void MainWindow::I104M_Loga(QString str, int id) {
   }
 }
 
-void MainWindow::slot_dataIndication(const QVector<iec_obj>& objects) {
+// take everything the protocol thread received since the last call: one
+// pending event per RTU at most, the backlog itself is bounded in QIec104
+void MainWindow::slot_dataAvailable() {
+  if (i104 == nullptr)
+    return;
+  const QVector<QVector<iec_obj>> batches = i104->takePendingData();
+  for (const QVector<iec_obj>& objects : batches)
+    processDataIndication(objects);
+}
+
+void MainWindow::processDataIndication(const QVector<iec_obj>& objects) {
   if (objects.isEmpty()) {
     return;
   }
@@ -1123,7 +1228,10 @@ void MainWindow::slot_tcpdisconnect() {
   }
 
   ui->lbStatus->setText("<font color='red'> TCP DISCONNECTED!</font>");
-  LastCommand.active = false; // responses from a previous connection don't count
+  // responses from a previous connection don't count; tell OSHMI it failed
+  if (LastCommand.active && LastCommand.fromI104M)
+    reportCommandFailure(LastCommand.cmd, "CONNECTION LOST BEFORE THE COMMAND RESPONSE");
+  endCommand();
   ui->pbGI->setEnabled(false);
   ui->pbSendCommandsButton->setEnabled(false);
 
@@ -1262,21 +1370,27 @@ void MainWindow::slot_commandActRespIndication(const iec_obj& obj) {
       if (sameCommandValue(obj, LastCommand.cmd)) {
         iec_obj executeObj = LastCommand.cmd;
         executeObj.se = iec104_class::EXECUTE;
-        queueProtocolCommand(executeObj, LastCommand.fromI104M);
+        queueProtocolCommand(executeObj, LastCommand.fromI104M, true);
       } else {
         i104->mLog.pushMsg("     SELECT CONFIRMATION VALUE MISMATCH, NOT EXECUTED");
-        LastCommand.active = false;
+        const SentCommand failed = LastCommand;
+        endCommand();
+        if (failed.fromI104M)
+          reportCommandFailure(failed.cmd, "SELECT CONFIRMED WITH ANOTHER VALUE, NOT EXECUTED");
       }
       return;
     }
     // negative select confirmation: report it below
-    LastCommand.active = false;
+    endCommand();
   } else if (obj.cause == iec104_class::ACTTERM) {
-    LastCommand.active = false;
+    endCommand();
     return;
-  } else if (obj.cause != iec104_class::REQUEST &&
-             obj.cause != iec104_class::ACTIVATION &&
-             obj.cause != iec104_class::ACTCONFIRM) {
+  } else if (obj.cause == iec104_class::REQUEST ||
+             obj.cause == iec104_class::ACTCONFIRM) {
+    // final answer for the transaction (activation termination, when the
+    // slave sends one, is not needed to free the next command)
+    endCommand();
+  } else if (obj.cause != iec104_class::ACTIVATION) {
     return;
   }
 
@@ -1295,16 +1409,12 @@ void MainWindow::slot_commandRejected(const iec_obj& obj) {
                           LastCommand.cmd.type == obj.type &&
                           LastCommand.cmd.address == obj.address;
   const bool fromI104M = wasPending && LastCommand.fromI104M;
-  if (wasPending)
+  if (wasPending) {
     LastCommand.active = false;
-  if (!fromI104M)
-    return;
-
-  iec_obj resp = obj;
-  resp.cause = iec104_class::ACTCONFIRM;
-  resp.pn = iec104_class::NEGATIVE;
-  I104M_Loga("T<-- I104M: COMMAND NOT SENT TO IEC104 SLAVE");
-  sendI104MCommandResponse(resp);
+    tmCommandTimeout->stop();
+  }
+  if (fromI104M)
+    reportCommandFailure(obj, "COMMAND NOT SENT TO IEC104 SLAVE");
 }
 
 void MainWindow::sendI104MCommandResponse(const iec_obj& obj) {
@@ -1580,7 +1690,8 @@ void MainWindow::I104M_processPoints(const iec_obj *obj, unsigned numpoints) {
       i104mobj->qds =
           static_cast<unsigned char>(obj->ov | (obj->bl << 4) | (obj->sb << 5) |
                                      (obj->nt << 6) | (obj->iv << 7));
-      i104mobj->vti = static_cast<unsigned char>(obj->value) |
+      // back to the 7 bit two's complement VTI encoding (value -64..63)
+      i104mobj->vti = static_cast<unsigned char>(static_cast<int>(obj->value) & 0x7F) |
                       static_cast<unsigned char>(obj->t << 7);
     }
 

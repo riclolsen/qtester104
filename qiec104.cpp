@@ -44,6 +44,9 @@ QIec104::QIec104(QObject *parent) : QObject(parent) {
   mLog.doLogTime();
 
   tcps = new QSslSocket(this);
+  // bounded socket buffer: when reading pauses, TCP flow control pushes back
+  // on the slave instead of Qt buffering without limit
+  tcps->setReadBufferSize(256 * 1024);
   tmKeepAlive = new QTimer(this);
 
   connect(tmKeepAlive, SIGNAL(timeout()), this, SLOT(slot_keep_alive()));
@@ -106,7 +109,47 @@ void QIec104::waitBytes(int bytes, int msTout) {
 }
 
 void QIec104::dataIndicationBatch(QVector<iec_obj> &objects) {
-  emit signal_dataIndication(objects); // implicitly shared, not copied
+  bool notify = false;
+  {
+    QMutexLocker locker(&mDataMutex);
+    mPendingObjects += objects.size();
+    mPendingData.append(std::move(objects));
+    notify = !mNotifyPending;
+    mNotifyPending = true;
+  }
+  if (notify)
+    emit signal_dataAvailable();
+}
+
+bool QIec104::canAcceptData() {
+  QMutexLocker locker(&mDataMutex);
+  if (mPendingObjects < kMaxPendingObjects)
+    return true;
+  if (!mReadPaused)
+    mLog.pushMsg("*** RECEIVE BACKLOG FULL, PAUSING READS UNTIL THE DISPLAY CATCHES UP");
+  mReadPaused = true;
+  return false;
+}
+
+QVector<QVector<iec_obj>> QIec104::takePendingData() {
+  QVector<QVector<iec_obj>> data;
+  bool resume = false;
+  {
+    QMutexLocker locker(&mDataMutex);
+    data.swap(mPendingData);
+    mPendingObjects = 0;
+    mNotifyPending = false;
+    resume = mReadPaused;
+    mReadPaused = false;
+  }
+  if (resume) // continue with the bytes left in the socket, in the worker thread
+    QMetaObject::invokeMethod(this, &QIec104::resumeReading, Qt::QueuedConnection);
+  return data;
+}
+
+void QIec104::resumeReading() {
+  if (!mEnding && tcps->state() == QAbstractSocket::ConnectedState)
+    packetReadyTCP();
 }
 
 void QIec104::connectTCP() {
@@ -280,6 +323,12 @@ void QIec104::sendTCP(char *data, int sz) {
 }
 
 void QIec104::slot_tcpconnect() {
+  if (mEnding || !mAllowConnect) {
+    // connection completed after connecting was disabled (became secondary)
+    mLog.pushMsg("*** CONNECTION NO LONGER ALLOWED, CLOSING");
+    tcps->abort();
+    return;
+  }
   tcps->setSocketOption(QAbstractSocket::LowDelayOption, 1);
   if (mUseTls) {
       // mLog.pushMsg("TLS Handshake Successful. Connection Encrypted.");
@@ -356,7 +405,9 @@ void QIec104::slot_tcpreadytoread() {
 
 void QIec104::disable_connect() {
   mAllowConnect = false;
-  if (tcps->state() == QAbstractSocket::ConnectedState)
+  // also cancel a connection still being established (host lookup, TCP or
+  // TLS handshake), so a secondary never ends up talking to the RTU
+  if (tcps->state() != QAbstractSocket::UnconnectedState)
     disconnectTCP();
 }
 

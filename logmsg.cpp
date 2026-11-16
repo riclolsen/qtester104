@@ -91,8 +91,7 @@ bool TLogMsg::haveMsg()
 
 bool TLogMsg::isLogging()
 {
-    QMutexLocker locker(&mMutex);
-    return mDoLog;
+    return mDoLog.load(std::memory_order_relaxed); // called per frame/point
 }
 
 // coloca a mensagem na fila
