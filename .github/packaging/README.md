@@ -28,8 +28,8 @@ native Schannel TLS backend.
 To release, push a tag pointing to a commit containing this workflow, for example:
 
 ```sh
-git tag V3.1.2
-git push origin V3.1.2
+git tag V3.2.0
+git push origin V3.2.0
 ```
 
 Use Actions → Build release binaries → Run workflow to test builds without
