@@ -264,6 +264,7 @@ void iec104_class::onConnectTCP() {
   test_command_count = 0;
   broken_msg = false; // discard any partial apdu from a previous connection
   rxBytes = 0;
+  startRx = false;
   mLog.pushMsg("*** TCP CONNECT!");
   sendStartDTACT();
 }
@@ -277,6 +278,7 @@ void iec104_class::onDisconnectTCP() {
   tout_testfr_con = -1;
   broken_msg = false;
   rxBytes = 0;
+  startRx = false;
   TxOk = false;
   mLog.pushMsg("*** TCP DISCONNECT!");
 }
@@ -455,16 +457,20 @@ void iec104_class::packetReadyTCP() {
   while (true) {
 
     if (!broken_msg) {
-      // look for a START
-      do {
-        bytesrec = readTCP(reinterpret_cast<char*>(br), 1);
-        if (bytesrec == 0)
-          return;
-        byt = br[0];
-      } while (byt != START);
+      if (!startRx) {
+        // look for a START
+        do {
+          bytesrec = readTCP(reinterpret_cast<char*>(br), 1);
+          if (bytesrec == 0)
+            return;
+          byt = br[0];
+        } while (byt != START);
+        startRx = true;
+      }
       bytesrec = readTCP(reinterpret_cast<char*>(br + 1), 1); // length of apdu
       if (bytesrec == 0)
-        return;
+        return; // keep the START, continue with the length byte on the next read
+      startRx = false;
       rxBytes = 0; // no payload bytes received yet for this apdu
     }
 
