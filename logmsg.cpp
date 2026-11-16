@@ -35,6 +35,7 @@ using namespace std;
 TLogMsg::TLogMsg()
 {
     mMaxMsg = 1000;
+    mDropped = 0;
     mDoLog = true;
     mRegTime = false;
     mLastTime = 0;
@@ -64,6 +65,7 @@ void TLogMsg::deactivateLog()
     QMutexLocker locker(&mMutex);
     mLstLog.clear(); // clean lists
     mLstTime.clear();
+    mDropped = 0;
     mDoLog = false;
 }
 
@@ -97,11 +99,26 @@ bool TLogMsg::isLogging()
 void TLogMsg::pushMsg( const char * msg, unsigned int level )
 {
     QMutexLocker locker(&mMutex);
-    if ( mDoLog && ( mLstLog.size() < mMaxMsg ) && ( mLevel <= level ) ) {
-        mLstLog.push_back( msg );
-        if ( mRegTime ) { // coloca hora na fila, se for o caso
-            mLstTime.push_back( time( NULL ) );
+    if ( !mDoLog || ( mLevel > level ) )
+        return;
+    if ( mLstLog.size() >= mMaxMsg ) {
+        mDropped++; // queue full: count it, reported when there is room again
+        return;
+    }
+    if ( mDropped > 0 ) {
+        // leave room for the message itself after the notice
+        if ( mLstLog.size() + 1 >= mMaxMsg ) {
+            mDropped++;
+            return;
         }
+        mLstLog.push_back( "*** LOG OVERFLOW: " + to_string( mDropped ) + " MESSAGES DROPPED ***" );
+        if ( mRegTime )
+            mLstTime.push_back( time( NULL ) );
+        mDropped = 0;
+    }
+    mLstLog.push_back( msg );
+    if ( mRegTime ) { // coloca hora na fila, se for o caso
+        mLstTime.push_back( time( NULL ) );
     }
 }
 
@@ -128,10 +145,13 @@ string TLogMsg::pullMsg()
         mLstTime.pop_front();
         if (hora != mLastTime)
           {
-          struct tm * timeinfo;
-          timeinfo = localtime ( &hora );
-          // strftime ( buffer,200,"%d/%m %H:%M:%S ",timeinfo );
-          strftime ( buffer,200,"%H:%M:%S ",timeinfo );
+          struct tm timeinfo{};
+#ifdef _WIN32
+          localtime_s ( &timeinfo, &hora );
+#else
+          localtime_r ( &hora, &timeinfo ); // thread-safe, unlike localtime()
+#endif
+          strftime ( buffer,200,"%H:%M:%S ",&timeinfo );
           s = buffer + s;
           }
         else

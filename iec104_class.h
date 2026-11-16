@@ -254,11 +254,16 @@ private:
                                // address of ASDU, ca)
   unsigned short slaveASDUAddrCmd; // common address of ASDU, ca for commands
   unsigned Port;                   // iec104 tcp port (defaults to 2404)
-  char slaveIP[21];                // slave (secondary, main RTU) IP address
-  char slaveIP_backup[21];         // slave (secondary, backup RTU) IP address
-  static const int t3_testfr = 10;
+  char slaveIP[256];               // slave (secondary, main RTU) IP address or host name
+  char slaveIP_backup[256];        // slave (secondary, backup RTU) IP address or host name
+  // IEC 60870-5-104 default timeouts (seconds): t1=15, t2=10 (< t1), t3=20
+  static const int t3_testfr = 20;
   static const int t2_supervisory = 8;
-  static const int t1_startdtact = 6;
+  static const int t1_startdtact = 15;
+  int tout_ack = -1;      // t1 countdown waiting for the ack of sent I-frames
+  void startAckTimer();
+  void ackReceived(unsigned short nr);
+  bool checkReadyToTransmit(const char* what);
   int gi_period; // minimum time for request between GI's
   static const int gi_retry_time =
       45; // wait time to retry when requested a GI and not responded
@@ -300,6 +305,10 @@ protected:
   // user point process, user provided. (on one call must be only objects of one
   // type)
   virtual void dataIndication(iec_obj * /*obj*/, unsigned /*numpoints*/) {}
+  // same, receiving the batch as a vector the derived class may keep (no copy)
+  virtual void dataIndicationBatch(QVector<iec_obj> &objects) {
+    dataIndication(objects.data(), unsigned(objects.size()));
+  }
   // inform user that ACTCONFIRM of Interrogation was received from slave
   virtual void interrogationActConfIndication() {}
   // inform user that ACTTERM of Interrogation was received from slave

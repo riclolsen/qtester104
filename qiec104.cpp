@@ -57,7 +57,6 @@ QIec104::QIec104(QObject *parent) : QObject(parent) {
           Qt::DirectConnection);
 
   connect(tcps, &QSslSocket::sslErrors, this, &QIec104::slot_sslErrors);
-  connect(tcps, &QSslSocket::errorOccurred, this, &QIec104::slot_socketError);
   connect(tcps, &QSslSocket::encrypted, this, &QIec104::slot_socketEncrypted);
   connect(tcps, &QSslSocket::handshakeInterruptedOnError, this,
           &QIec104::slot_handshakeInterruptedOnError);
@@ -95,6 +94,10 @@ void QIec104::setPeerVerifyMode(QSslSocket::PeerVerifyMode mode) {
     mVerifyMode = mode;
 }
 
+void QIec104::setPeerVerifyName(const QString &name) {
+    mPeerVerifyName = name.trimmed();
+}
+
 void QIec104::waitBytes(int bytes, int msTout) {
   while (tcps->bytesAvailable() < bytes && msTout > 0) {
     tcps->waitForReadyRead(8);
@@ -102,13 +105,8 @@ void QIec104::waitBytes(int bytes, int msTout) {
   }
 }
 
-void QIec104::dataIndication(iec_obj *obj, unsigned numpoints) {
-  QVector<iec_obj> objects;
-  objects.reserve(static_cast<qsizetype>(numpoints));
-  for (unsigned i = 0; i < numpoints; ++i) {
-    objects.append(obj[i]);
-  }
-  emit signal_dataIndication(objects);
+void QIec104::dataIndicationBatch(QVector<iec_obj> &objects) {
+  emit signal_dataIndication(objects); // implicitly shared, not copied
 }
 
 void QIec104::connectTCP() {
@@ -121,7 +119,7 @@ void QIec104::connectTCP() {
           mLog.pushMsg("Attempting TLS connection...");
 
           QSslConfiguration sslConfig = QSslConfiguration::defaultConfiguration();
-          sslConfig.setProtocol(QSsl::TlsV1_0OrLater);
+          sslConfig.setProtocol(QSsl::TlsV1_2OrLater);
 
           // Load CA certificates for peer verification
           if (!mCaCertPath.isEmpty()) {
@@ -166,8 +164,20 @@ void QIec104::connectTCP() {
           if (!mPrivateKeyPath.isEmpty()) {
               QFile keyFile(mPrivateKeyPath);
               if (keyFile.open(QIODevice::ReadOnly)) {
-                  QSslKey privateKey(&keyFile, QSsl::Rsa, QSsl::Pem, QSsl::PrivateKey);
+                  // accept RSA, EC or DSA keys, PEM or DER encoded
+                  const QByteArray keyData = keyFile.readAll();
                   keyFile.close();
+                  QSslKey privateKey;
+                  for (const QSsl::EncodingFormat format : {QSsl::Pem, QSsl::Der}) {
+                      for (const QSsl::KeyAlgorithm algorithm :
+                           {QSsl::Rsa, QSsl::Ec, QSsl::Dsa}) {
+                          privateKey = QSslKey(keyData, algorithm, format, QSsl::PrivateKey);
+                          if (!privateKey.isNull())
+                              break;
+                      }
+                      if (!privateKey.isNull())
+                          break;
+                  }
                   if (privateKey.isNull()) {
                       mLog.pushMsg(QString("Warning: Could not load private key from %1")
                                        .arg(mPrivateKeyPath)
@@ -188,11 +198,18 @@ void QIec104::connectTCP() {
               }
           }
 
-          sslConfig.setSslOption(QSsl::SslOptionDisableServerNameIndication, true);
+          // send SNI only when an explicit certificate name is configured
+          sslConfig.setSslOption(QSsl::SslOptionDisableServerNameIndication,
+                                 mPeerVerifyName.isEmpty());
           // apply per-socket only: changing the app-default configuration here
           // would leak this tab's TLS settings into the other RTU tabs
           tcps->setSslConfiguration(sslConfig);
           tcps->setPeerVerifyMode(mVerifyMode); // Set verification mode
+          // name the certificate must carry; by default the host/IP connected to
+          tcps->setPeerVerifyName(mPeerVerifyName);
+          if (!mPeerVerifyName.isEmpty())
+              mLog.pushMsg(QString("Expected peer certificate name: %1")
+                               .arg(mPeerVerifyName).toStdString().c_str());
           if (verifiesPeer()) {
               mLog.pushMsg("Verifying peer certificate: true");
           } else {
@@ -234,9 +251,11 @@ void QIec104::disconnectTCP() { tcps->abort(); }
 
 void QIec104::slot_tcperror(QAbstractSocket::SocketError socketError) {
   if (socketError != QAbstractSocket::SocketTimeoutError) {
-    char buf[100];
-    sprintf(buf, "SocketError: %d", socketError);
-    mLog.pushMsg(const_cast<char *>(buf));
+    mLog.pushMsg(QString("SocketError: %1 %2")
+                     .arg(int(socketError))
+                     .arg(tcps->errorString())
+                     .toStdString()
+                     .c_str());
   }
 }
 
@@ -373,9 +392,6 @@ void QIec104::slot_sslErrors(const QList<QSslError> &errors) {
   }
 }
 
-void QIec104::slot_socketError(QAbstractSocket::SocketError) {
-    mLog.pushMsg(tcps->errorString().toStdString().c_str());
-}
 
 void QIec104::slot_socketEncrypted() { mLog.pushMsg("Encrypted slot!"); }
 

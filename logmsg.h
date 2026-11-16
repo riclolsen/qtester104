@@ -33,6 +33,7 @@
 // Buffered  message
 
 #include <time.h>
+#include <ctime>
 #include <list>
 #include <QMutex>
 #include <string>
@@ -58,6 +59,7 @@ private:
     std::list <time_t> mLstTime;
     mutable QMutex mMutex;
     unsigned int mMaxMsg;
+    unsigned long mDropped; // messages discarded because the queue was full
     bool mDoLog;
     bool mRegTime;
     time_t mLastTime; // time of the previously pulled message

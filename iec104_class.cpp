@@ -33,8 +33,30 @@
 #include <math.h>
 #include <string>
 #include <sstream>
+#include <chrono>
 
 #include "iec104_class.h"
+
+// thread-safe local time (localtime() shares a static buffer between the
+// protocol threads of all RTU tabs), also returning the milliseconds
+static tm localNow(int* msec) {
+  using namespace std::chrono;
+  const auto now = system_clock::now();
+  const time_t t = system_clock::to_time_t(now);
+  *msec = int(duration_cast<milliseconds>(now.time_since_epoch()).count() % 1000);
+  tm out{};
+#ifdef _WIN32
+  localtime_s(&out, &t);
+#else
+  localtime_r(&t, &out);
+#endif
+  return out;
+}
+
+// CP56Time2a day of week is 1=Monday..7=Sunday, tm_wday is 0=Sunday..6
+static uint8_t cp56WeekDay(const tm* t) {
+  return static_cast<uint8_t>(t->tm_wday == 0 ? 7 : t->tm_wday);
+}
 
 using namespace std;
 
@@ -262,6 +284,7 @@ void iec104_class::onConnectTCP() {
   VS = 0;
   VR = 0;
   test_command_count = 0;
+  tout_ack = -1;
   broken_msg = false; // discard any partial apdu from a previous connection
   rxBytes = 0;
   startRx = false;
@@ -276,6 +299,7 @@ void iec104_class::onDisconnectTCP() {
   tout_gi = -1;
   tout_testfr = -1;
   tout_testfr_con = -1;
+  tout_ack = -1;
   broken_msg = false;
   rxBytes = 0;
   startRx = false;
@@ -327,6 +351,18 @@ void iec104_class::onTimerSecond() {
       }
     }
 
+    // sent I-frames not acknowledged in t1: close the connection (the
+    // keep alive logic reconnects)
+    if (tout_ack > 0) {
+      tout_ack--;
+      if (tout_ack == 0) {
+        tout_ack = -1;
+        mLog.pushMsg("*** T1 TIMEOUT: I-FRAMES NOT ACKNOWLEDGED!");
+        disconnectTCP();
+        return;
+      }
+    }
+
     // no answer to the test frame in t1: connection is dead, force a
     // disconnect so the keep alive logic can reconnect
     if (tout_testfr_con > 0) {
@@ -341,8 +377,32 @@ void iec104_class::onTimerSecond() {
 
 }
 
+void iec104_class::startAckTimer() {
+  if (tout_ack < 0)
+    tout_ack = t1_startdtact; // t1: wait for the slave to acknowledge
+}
+
+// N(R) from the slave acknowledges every I-frame sent before it
+void iec104_class::ackReceived(unsigned short nr) {
+  if (nr == VS)
+    tout_ack = -1;               // everything acknowledged
+  else if (tout_ack >= 0)
+    tout_ack = t1_startdtact;    // progress, restart t1 for the rest
+}
+
+bool iec104_class::checkReadyToTransmit(const char* what) {
+  if (connectedTCP && TxOk)
+    return true;
+  string msg = string("     LINK NOT READY (NO STARTDTCON), ") + what + " NOT SENT";
+  mLog.pushMsg(msg.c_str());
+  return false;
+}
+
 void iec104_class::solicitGI() {
   iec_apdu wapdu;
+
+  if (!checkReadyToTransmit("GI"))
+    return;
 
   wapdu.start = START;
   wapdu.length = 0x0E;
@@ -362,12 +422,16 @@ void iec104_class::solicitGI() {
   wapdu.dados[3] = 0x14;
   sendTCP(reinterpret_cast<char*>(&wapdu), 16);
   VS += 2;
+  startAckTimer();
   mLog.pushMsg("    GENERAL INTERROGATION ");
   tout_gi = gi_retry_time;
 }
 
 void iec104_class::solicitInterrogation(char group) {
   iec_apdu wapdu;
+
+  if (!checkReadyToTransmit("INTERROGATION"))
+    return;
 
   wapdu.start = START;
   wapdu.length = 0x0E;
@@ -387,6 +451,7 @@ void iec104_class::solicitInterrogation(char group) {
   wapdu.dados[3] = group;
   sendTCP(reinterpret_cast<char*>(&wapdu), 16);
   VS += 2;
+  startAckTimer();
   char buflog[1000];
   sprintf(buflog, "     INTERROGATION GROUP %d", group);
   mLog.pushMsg(buflog);
@@ -408,8 +473,9 @@ void iec104_class::confTestCommand() {
   wapdu.asduh.pn = 0;
   wapdu.asduh.oa = masterAddress;
   wapdu.asduh.ca = slaveAddress;
-  time_t tm1 = time(nullptr);
-  tm* agora = localtime(&tm1);
+  int nowMs = 0;
+  tm agoraTm = localNow(&nowMs);
+  tm* agora = &agoraTm;
 
   wapdu.asdu107.ioa16 = 0;
   wapdu.asdu107.ioa8 = 0;
@@ -419,10 +485,10 @@ void iec104_class::confTestCommand() {
   wapdu.asdu107.time.mday = static_cast<uint8_t>(agora->tm_mday);
   wapdu.asdu107.time.hour = static_cast<uint8_t>(agora->tm_hour);
   wapdu.asdu107.time.min = static_cast<uint8_t>(agora->tm_min);
-  wapdu.asdu107.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000);
+  wapdu.asdu107.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000 + nowMs);
   wapdu.asdu107.time.su = static_cast<uint8_t>(agora->tm_isdst);
   wapdu.asdu107.time.iv = 0;
-  wapdu.asdu107.time.wday = static_cast<uint8_t>(agora->tm_wday);
+  wapdu.asdu107.time.wday = cp56WeekDay(agora);
   wapdu.asdu107.time.res1 = 0;
   wapdu.asdu107.time.res2 = 0;
   wapdu.asdu107.time.res3 = 0;
@@ -430,6 +496,7 @@ void iec104_class::confTestCommand() {
 
   sendTCP(reinterpret_cast<char*>(&wapdu), 22 + 2);
   VS += 2;
+  startAckTimer();
 
   mLog.pushMsg("     TEST COMMAND CONF ");
 }
@@ -713,7 +780,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
 
         case SUPERVISORY:
           mLog.pushMsg("     SUPERVISORY");
-          // do what?
+          ackReceived(papdu->NR);
           break;
 
         default: // error
@@ -741,6 +808,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
       }
 
       VR = VR_NEW + 2;
+      ackReceived(papdu->NR);
     }
 
     oss.str("");
@@ -789,10 +857,12 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
     if (valid_length)
     switch (papdu->asduh.type) {
       case M_SP_NA_1: { // 1: DIGITAL SINGLE
-        char logpointbuf[15000] = "";
+        char logpointbuf[15000];
+        logpointbuf[0] = '\0';
         unsigned int addr24 = 0;
         iec_type1* pobj;
-        iec_obj* piecarr = new iec_obj [papdu->asduh.num];
+        QVector<iec_obj> piecvec(papdu->asduh.num); // value-initialised
+        iec_obj* piecarr = piecvec.data();
         if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
@@ -827,15 +897,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           }
         }
         LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
-        dataIndication(piecarr, papdu->asduh.num);
-        delete[] piecarr;
+        dataIndicationBatch(piecvec);
       }
       break;
       case M_DP_NA_1: { // 3: DIGITAL DOUBLE
-        char logpointbuf[15000] = "";
+        char logpointbuf[15000];
+        logpointbuf[0] = '\0';
         unsigned int addr24 = 0;
         iec_type3* pobj;
-        iec_obj* piecarr = new iec_obj [papdu->asduh.num];
+        QVector<iec_obj> piecvec(papdu->asduh.num); // value-initialised
+        iec_obj* piecarr = piecvec.data();
         if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
@@ -871,15 +942,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           }
         }
         LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
-        dataIndication(piecarr, papdu->asduh.num);
-        delete[] piecarr;
+        dataIndicationBatch(piecvec);
       }
       break;
       case M_ST_NA_1: { // 5: step position
-        char logpointbuf[15000] = "";
+        char logpointbuf[15000];
+        logpointbuf[0] = '\0';
         unsigned int addr24 = 0;
         iec_type5* pobj;
-        iec_obj* piecarr = new iec_obj [papdu->asduh.num];
+        QVector<iec_obj> piecvec(papdu->asduh.num); // value-initialised
+        iec_obj* piecarr = piecvec.data();
         if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
@@ -915,15 +987,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           }
         }
         LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
-        dataIndication(piecarr, papdu->asduh.num);
-        delete[] piecarr;
+        dataIndicationBatch(piecvec);
       }
       break;
       case M_ME_NA_1: { // 9: ANALOGIC NORMALIZED
-        char logpointbuf[15000] = "";
+        char logpointbuf[15000];
+        logpointbuf[0] = '\0';
         unsigned int addr24 = 0;
         iec_type9* pobj;
-        iec_obj* piecarr = new iec_obj [papdu->asduh.num];
+        QVector<iec_obj> piecvec(papdu->asduh.num); // value-initialised
+        iec_obj* piecarr = piecvec.data();
         if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
@@ -958,15 +1031,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           }
         }
         LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
-        dataIndication(piecarr, papdu->asduh.num);
-        delete[] piecarr;
+        dataIndicationBatch(piecvec);
       }
       break;
       case M_ME_ND_1: { // 21: ANALOGIC NORMALIZED WITHOUT QUALITY
-		char logpointbuf[15000] = "";
+		char logpointbuf[15000];
+        logpointbuf[0] = '\0';
         unsigned int addr24 = 0;
         iec_type21* pobj;
-        iec_obj* piecarr = new iec_obj [papdu->asduh.num];
+        QVector<iec_obj> piecvec(papdu->asduh.num); // value-initialised
+        iec_obj* piecarr = piecvec.data();
         if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
@@ -999,14 +1073,15 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           }
         }
         LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
-        dataIndication(piecarr, papdu->asduh.num);
-        delete[] piecarr;
+        dataIndicationBatch(piecvec);
       }
       break;      case M_ME_NB_1: { // 11: ANALOGIC CONVERTED
-        char logpointbuf[15000] = "";
+        char logpointbuf[15000];
+        logpointbuf[0] = '\0';
         unsigned int addr24 = 0;
         iec_type11* pobj;
-        iec_obj* piecarr = new iec_obj [papdu->asduh.num];
+        QVector<iec_obj> piecvec(papdu->asduh.num); // value-initialised
+        iec_obj* piecarr = piecvec.data();
         if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
@@ -1041,15 +1116,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           }
         }
         LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
-        dataIndication(piecarr, papdu->asduh.num);
-        delete[] piecarr;
+        dataIndicationBatch(piecvec);
       }
       break;
       case M_ME_NC_1: { // 13: ANALOGIC FLOATING POINT
-        char logpointbuf[15000] = "";
+        char logpointbuf[15000];
+        logpointbuf[0] = '\0';
         unsigned int addr24 = 0;
         iec_type13* pobj;
-        iec_obj* piecarr = new iec_obj [papdu->asduh.num];
+        QVector<iec_obj> piecvec(papdu->asduh.num); // value-initialised
+        iec_obj* piecarr = piecvec.data();
         if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
@@ -1084,15 +1160,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           }
         }
         LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
-        dataIndication(piecarr, papdu->asduh.num);
-        delete[] piecarr;
+        dataIndicationBatch(piecvec);
       }
       break;
       case M_SP_TB_1: { // 30:  DIGITAL SINGLE WITH LONG TIME TAG
-        char logpointbuf[15000] = "";
+        char logpointbuf[15000];
+        logpointbuf[0] = '\0';
         unsigned int addr24 = 0;
         iec_type30* pobj;
-        iec_obj* piecarr = new iec_obj [papdu->asduh.num];
+        QVector<iec_obj> piecvec(papdu->asduh.num); // value-initialised
+        iec_obj* piecarr = piecvec.data();
         if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
@@ -1128,15 +1205,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           }
         }
         LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
-        dataIndication(piecarr, papdu->asduh.num);
-        delete[] piecarr;
+        dataIndicationBatch(piecvec);
       }
       break;
       case M_DP_TB_1: { // 31: DIGITAL DOUBLE WITH LONG TIME TAG
-        char logpointbuf[15000] = "";
+        char logpointbuf[15000];
+        logpointbuf[0] = '\0';
         unsigned int addr24 = 0;
         iec_type31* pobj;
-        iec_obj* piecarr = new iec_obj [papdu->asduh.num];
+        QVector<iec_obj> piecvec(papdu->asduh.num); // value-initialised
+        iec_obj* piecarr = piecvec.data();
         if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
@@ -1173,15 +1251,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           }
         }
         LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
-        dataIndication(piecarr, papdu->asduh.num);
-        delete[] piecarr;
+        dataIndicationBatch(piecvec);
       }
       break;
       case M_ST_TB_1: { // 32: TAP WITH TIME TAG
-        char logpointbuf[15000] = "";
+        char logpointbuf[15000];
+        logpointbuf[0] = '\0';
         unsigned int addr24 = 0;
         iec_type32* pobj;
-        iec_obj* piecarr = new iec_obj [papdu->asduh.num];
+        QVector<iec_obj> piecvec(papdu->asduh.num); // value-initialised
+        iec_obj* piecarr = piecvec.data();
         if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
@@ -1218,15 +1297,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           }
         }
         LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
-        dataIndication(piecarr, papdu->asduh.num);
-        delete[] piecarr;
+        dataIndicationBatch(piecvec);
       }
       break;
       case M_PS_NA_1: { // Packed single point information with status change detection
-        char logpointbuf[15000] = "";
+        char logpointbuf[15000];
+        logpointbuf[0] = '\0';
         unsigned int addr24 = 0;
         iec_type20* pobj;
-        iec_obj* piecarr = new iec_obj [papdu->asduh.num];
+        QVector<iec_obj> piecvec(papdu->asduh.num); // value-initialised
+        iec_obj* piecarr = piecvec.data();
         if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
@@ -1297,15 +1377,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           }
         }
         LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
-        dataIndication(piecarr, papdu->asduh.num);
-        delete[] piecarr;
+        dataIndicationBatch(piecvec);
       }
       break;
       case M_BO_NA_1: { // 7 bitstring
-        char logpointbuf[15000] = "";
+        char logpointbuf[15000];
+        logpointbuf[0] = '\0';
         unsigned int addr24 = 0;
         iec_type7* pobj;
-        iec_obj* piecarr = new iec_obj [papdu->asduh.num];
+        QVector<iec_obj> piecvec(papdu->asduh.num); // value-initialised
+        iec_obj* piecarr = piecvec.data();
         if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
@@ -1375,15 +1456,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           }
         }
         LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
-        dataIndication(piecarr, papdu->asduh.num);
-        delete[] piecarr;
+        dataIndicationBatch(piecvec);
       }
       break;
       case M_BO_TB_1: { // 33 bitstring with time tag
-        char logpointbuf[15000] = "";
+        char logpointbuf[15000];
+        logpointbuf[0] = '\0';
         unsigned int addr24 = 0;
         iec_type33* pobj;
-        iec_obj* piecarr = new iec_obj [papdu->asduh.num];
+        QVector<iec_obj> piecvec(papdu->asduh.num); // value-initialised
+        iec_obj* piecarr = piecvec.data();
         if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
@@ -1454,15 +1536,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           }
         }
         LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
-        dataIndication(piecarr, papdu->asduh.num);
-        delete[] piecarr;
+        dataIndicationBatch(piecvec);
       }
       break;
       case M_ME_TD_1: { //34 MEASURED VALUE, NORMALIZED WITH TIME TAG
-        char logpointbuf[15000] = "";
+        char logpointbuf[15000];
+        logpointbuf[0] = '\0';
         unsigned int addr24 = 0;
         iec_type34* pobj;
-        iec_obj* piecarr = new iec_obj [papdu->asduh.num];
+        QVector<iec_obj> piecvec(papdu->asduh.num); // value-initialised
+        iec_obj* piecarr = piecvec.data();
         if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
@@ -1505,15 +1588,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           }
         }
         LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
-        dataIndication(piecarr, papdu->asduh.num);
-        delete[] piecarr;
+        dataIndicationBatch(piecvec);
       }
       break;
       case M_ME_TE_1: { //35 MEASURED VALUE, SCALED WITH TIME TAG
-        char logpointbuf[15000] = "";
+        char logpointbuf[15000];
+        logpointbuf[0] = '\0';
         unsigned int addr24 = 0;
         iec_type35* pobj;
-        iec_obj* piecarr = new iec_obj [papdu->asduh.num];
+        QVector<iec_obj> piecvec(papdu->asduh.num); // value-initialised
+        iec_obj* piecarr = piecvec.data();
         if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
@@ -1556,15 +1640,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           }
         }
         LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
-        dataIndication(piecarr, papdu->asduh.num);
-        delete[] piecarr;
+        dataIndicationBatch(piecvec);
       }
       break;
       case M_ME_TF_1: { // 36 MEASURED VALUE, FLOATING POINT WITH TIME TAG
-        char logpointbuf[15000] = "";
+        char logpointbuf[15000];
+        logpointbuf[0] = '\0';
         unsigned int addr24 = 0;
         iec_type36* pobj;
-        iec_obj* piecarr = new iec_obj [papdu->asduh.num];
+        QVector<iec_obj> piecvec(papdu->asduh.num); // value-initialised
+        iec_obj* piecarr = piecvec.data();
         if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
@@ -1607,15 +1692,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           }
         }
         LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
-        dataIndication(piecarr, papdu->asduh.num);
-        delete[] piecarr;
+        dataIndicationBatch(piecvec);
       }
       break;
       case M_IT_NA_1: { // 15 = integrated totals without time tag
-        char logpointbuf[15000] = "";
+        char logpointbuf[15000];
+        logpointbuf[0] = '\0';
         unsigned int addr24 = 0;
         iec_type15* pobj;
-        iec_obj* piecarr = new iec_obj [papdu->asduh.num];
+        QVector<iec_obj> piecvec(papdu->asduh.num); // value-initialised
+        iec_obj* piecarr = piecvec.data();
         if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
@@ -1650,15 +1736,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           }
         }
         LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
-        dataIndication(piecarr, papdu->asduh.num);
-        delete[] piecarr;
+        dataIndicationBatch(piecvec);
       }
       break;
       case M_IT_TB_1: { // 37 = integrated totals with time tag
-        char logpointbuf[15000] = "";
+        char logpointbuf[15000];
+        logpointbuf[0] = '\0';
         unsigned int addr24 = 0;
         iec_type37* pobj;
-        iec_obj* piecarr = new iec_obj [papdu->asduh.num];
+        QVector<iec_obj> piecvec(papdu->asduh.num); // value-initialised
+        iec_obj* piecarr = piecvec.data();
         if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
@@ -1694,15 +1781,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           }
         }
         LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
-        dataIndication(piecarr, papdu->asduh.num);
-        delete[] piecarr;
+        dataIndicationBatch(piecvec);
       }
       break;
       case M_EP_TD_1: { // 38 = Event of protection equipment with CP56Time2a time tag
-        char logpointbuf[15000] = "";
+        char logpointbuf[15000];
+        logpointbuf[0] = '\0';
         unsigned int addr24 = 0;
         iec_type38* pobj;
-        iec_obj* piecarr = new iec_obj [papdu->asduh.num];
+        QVector<iec_obj> piecvec(papdu->asduh.num); // value-initialised
+        iec_obj* piecarr = piecvec.data();
         if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
@@ -1747,15 +1835,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           }
         }
         LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
-        dataIndication(piecarr, papdu->asduh.num);
-        delete[] piecarr;
+        dataIndicationBatch(piecvec);
       }
       break;
       case M_EP_TE_1: { // 39 = Packed start events of protection equipment with CP56Time2a time tag
-        char logpointbuf[15000] = "";
+        char logpointbuf[15000];
+        logpointbuf[0] = '\0';
         unsigned int addr24 = 0;
         iec_type39* pobj;
-        iec_obj* piecarr = new iec_obj [papdu->asduh.num];
+        QVector<iec_obj> piecvec(papdu->asduh.num); // value-initialised
+        iec_obj* piecarr = piecvec.data();
         if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
@@ -1806,15 +1895,16 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           }
         }
         LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
-        dataIndication(piecarr, papdu->asduh.num);
-        delete[] piecarr;
+        dataIndicationBatch(piecvec);
       }
       break;
       case M_EP_TF_1: { // 40 = Packed output circuit information of protection equipment with CP56Time2a time tag
-        char logpointbuf[15000] = "";
+        char logpointbuf[15000];
+        logpointbuf[0] = '\0';
         unsigned int addr24 = 0;
         iec_type40* pobj;
-        iec_obj* piecarr = new iec_obj [papdu->asduh.num];
+        QVector<iec_obj> piecvec(papdu->asduh.num); // value-initialised
+        iec_obj* piecarr = piecvec.data();
         if (papdu->asduh.cause >= 20 && papdu->asduh.cause <= 36)
           GIObjectCnt += papdu->asduh.num;
 
@@ -1863,8 +1953,7 @@ void iec104_class::parseAPDU(iec_apdu* papdu, int sz, bool accountandrespond) {
           }
         }
         LogPoint(logpointbuf, -1, 0, nullptr, nullptr);
-        dataIndication(piecarr, papdu->asduh.num);
-        delete[] piecarr;
+        dataIndicationBatch(piecvec);
       }
       break;
       case C_SC_NA_1: { // SINGLE COMMAND
@@ -2716,18 +2805,17 @@ void iec104_class::setCommandsEnabled(bool enabled) {
 
 bool iec104_class::sendCommand(iec_obj* obj) {
   iec_apdu apducmd;
-  time_t tm1 = time(nullptr);
-  tm* agora = localtime(&tm1);
+  int nowMs = 0;
+  tm agoraTm = localNow(&nowMs);
+  tm* agora = &agoraTm;
   stringstream oss;
 
   if (!commandsEnabled) {
     mLog.pushMsg("     COMMANDS NOT ALLOWED (ALLOW_COMMANDS=0), NOT SENT");
     return false;
   }
-  if (!connectedTCP || !TxOk) {
-    mLog.pushMsg("     LINK NOT READY (NO STARTDTCON), COMMAND NOT SENT");
+  if (!checkReadyToTransmit("COMMAND"))
     return false;
-  }
 
   // C_RD_NA_1 (read command) is only valid with COT=REQUEST; every other
   // command type uses COT=ACTIVATION
@@ -2758,6 +2846,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.nsq45.obj.se = obj->se;
       sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
       VS += 2;
+      startAckTimer();
 
       if (mLog.isLogging()) {
         oss.str("");
@@ -2795,6 +2884,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.nsq46.obj.se = obj->se;
       sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
       VS += 2;
+      startAckTimer();
 
       oss.str("");
       oss << "     DOUBLE COMMAND ADDRESS "
@@ -2829,6 +2919,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.nsq47.obj.se = obj->se;
       sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
       VS += 2;
+      startAckTimer();
       oss.str("");
       oss << "     STEP REG. COMMAND ADDRESS "
           << unsigned(obj->address)
@@ -2866,16 +2957,17 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.nsq58.obj.time.mday = static_cast<uint8_t>(agora->tm_mday);
       apducmd.nsq58.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
       apducmd.nsq58.obj.time.min = static_cast<uint8_t>(agora->tm_min);
-      apducmd.nsq58.obj.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000);
+      apducmd.nsq58.obj.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000 + nowMs);
       apducmd.nsq58.obj.time.iv = 0;
       apducmd.nsq58.obj.time.su = static_cast<uint8_t>(agora->tm_isdst);
-      apducmd.nsq58.obj.time.wday = static_cast<uint8_t>(agora->tm_wday);
+      apducmd.nsq58.obj.time.wday = cp56WeekDay(agora);
       apducmd.nsq58.obj.time.res1 = 0;
       apducmd.nsq58.obj.time.res2 = 0;
       apducmd.nsq58.obj.time.res3 = 0;
       apducmd.nsq58.obj.time.res4 = 0;
       sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
       VS += 2;
+      startAckTimer();
 
       oss.str("");
       oss << "     SINGLE COMMAND W/TIME ADDRESS "
@@ -2913,16 +3005,17 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.nsq59.obj.time.mday = static_cast<uint8_t>(agora->tm_mday);
       apducmd.nsq59.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
       apducmd.nsq59.obj.time.min = static_cast<uint8_t>(agora->tm_min);
-      apducmd.nsq59.obj.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000);
+      apducmd.nsq59.obj.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000 + nowMs);
       apducmd.nsq59.obj.time.iv = 0;
       apducmd.nsq59.obj.time.su = static_cast<uint8_t>(agora->tm_isdst);
-      apducmd.nsq59.obj.time.wday = static_cast<uint8_t>(agora->tm_wday);
+      apducmd.nsq59.obj.time.wday = cp56WeekDay(agora);
       apducmd.nsq59.obj.time.res1 = 0;
       apducmd.nsq59.obj.time.res2 = 0;
       apducmd.nsq59.obj.time.res3 = 0;
       apducmd.nsq59.obj.time.res4 = 0;
       sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
       VS += 2;
+      startAckTimer();
 
       oss.str("");
       oss << "     DOUBLE COMMAND W/TIME ADDRESS "
@@ -2960,16 +3053,17 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.nsq60.obj.time.mday = static_cast<uint8_t>(agora->tm_mday);
       apducmd.nsq60.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
       apducmd.nsq60.obj.time.min = static_cast<uint8_t>(agora->tm_min);
-      apducmd.nsq60.obj.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000);
+      apducmd.nsq60.obj.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000 + nowMs);
       apducmd.nsq60.obj.time.iv = 0;
       apducmd.nsq60.obj.time.su = static_cast<uint8_t>(agora->tm_isdst);
-      apducmd.nsq60.obj.time.wday = static_cast<uint8_t>(agora->tm_wday);
+      apducmd.nsq60.obj.time.wday = cp56WeekDay(agora);
       apducmd.nsq60.obj.time.res1 = 0;
       apducmd.nsq60.obj.time.res2 = 0;
       apducmd.nsq60.obj.time.res3 = 0;
       apducmd.nsq60.obj.time.res4 = 0;
       sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
       VS += 2;
+      startAckTimer();
       oss.str("");
       oss << "     STEP REG. COMMAND W/TIME ADDRESS "
           << unsigned(obj->address)
@@ -3003,6 +3097,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.nsq48.obj.se = obj->se;
       sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
       VS += 2;
+      startAckTimer();
 
       oss.str("");
       oss << "     NORMALISED COMMAND ADDRESS "
@@ -3038,16 +3133,17 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.nsq61.obj.time.mday = static_cast<uint8_t>(agora->tm_mday);
       apducmd.nsq61.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
       apducmd.nsq61.obj.time.min = static_cast<uint8_t>(agora->tm_min);
-      apducmd.nsq61.obj.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000);
+      apducmd.nsq61.obj.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000 + nowMs);
       apducmd.nsq61.obj.time.iv = 0;
       apducmd.nsq61.obj.time.su = static_cast<uint8_t>(agora->tm_isdst);
-      apducmd.nsq61.obj.time.wday = static_cast<uint8_t>(agora->tm_wday);
+      apducmd.nsq61.obj.time.wday = cp56WeekDay(agora);
       apducmd.nsq61.obj.time.res1 = 0;
       apducmd.nsq61.obj.time.res2 = 0;
       apducmd.nsq61.obj.time.res3 = 0;
       apducmd.nsq61.obj.time.res4 = 0;
       sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
       VS += 2;
+      startAckTimer();
 
       oss.str("");
       oss << "     NORMALISED COMMAND W/TIME ADDRESS "
@@ -3080,6 +3176,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.nsq49.obj.se = obj->se;
       sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
       VS += 2;
+      startAckTimer();
 
       oss.str("");
       oss << "     SCALED COMMAND ADDRESS "
@@ -3115,16 +3212,17 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.nsq62.obj.time.mday = static_cast<uint8_t>(agora->tm_mday);
       apducmd.nsq62.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
       apducmd.nsq62.obj.time.min = static_cast<uint8_t>(agora->tm_min);
-      apducmd.nsq62.obj.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000);
+      apducmd.nsq62.obj.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000 + nowMs);
       apducmd.nsq62.obj.time.iv = 0;
       apducmd.nsq62.obj.time.su = static_cast<uint8_t>(agora->tm_isdst);
-      apducmd.nsq62.obj.time.wday = static_cast<uint8_t>(agora->tm_wday);
+      apducmd.nsq62.obj.time.wday = cp56WeekDay(agora);
       apducmd.nsq62.obj.time.res1 = 0;
       apducmd.nsq62.obj.time.res2 = 0;
       apducmd.nsq62.obj.time.res3 = 0;
       apducmd.nsq62.obj.time.res4 = 0;
       sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
       VS += 2;
+      startAckTimer();
 
       oss.str("");
       oss << "     SCALED COMMAND W/TIME ADDRESS "
@@ -3157,6 +3255,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.nsq50.obj.se = obj->se;
       sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
       VS += 2;
+      startAckTimer();
 
       oss.str("");
       oss << "     FLOAT COMMAND ADDRESS "
@@ -3192,16 +3291,17 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.nsq63.obj.time.mday = static_cast<uint8_t>(agora->tm_mday);
       apducmd.nsq63.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
       apducmd.nsq63.obj.time.min = static_cast<uint8_t>(agora->tm_min);
-      apducmd.nsq63.obj.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000);
+      apducmd.nsq63.obj.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000 + nowMs);
       apducmd.nsq63.obj.time.iv = 0;
       apducmd.nsq63.obj.time.su = static_cast<uint8_t>(agora->tm_isdst);
-      apducmd.nsq63.obj.time.wday = static_cast<uint8_t>(agora->tm_wday);
+      apducmd.nsq63.obj.time.wday = cp56WeekDay(agora);
       apducmd.nsq63.obj.time.res1 = 0;
       apducmd.nsq63.obj.time.res2 = 0;
       apducmd.nsq63.obj.time.res3 = 0;
       apducmd.nsq63.obj.time.res4 = 0;
       sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
       VS += 2;
+      startAckTimer();
 
       oss.str("");
       oss << "     SCALED COMMAND W/TIME ADDRESS "
@@ -3232,6 +3332,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.asdu103.time = obj->timetag;
       sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
       VS += 2;
+      startAckTimer();
 
       oss.str("");
       oss << "     CLOCK SYNC COMMAND "
@@ -3261,6 +3362,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.dados[3] = static_cast<unsigned char>(obj->value); // QRP
       sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
       VS += 2;
+      startAckTimer();
 
       oss.str("");
       oss << "     RESET PROCESS COMMAND"
@@ -3288,6 +3390,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       test_command_count++;
       sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
       VS += 2;
+      startAckTimer();
 
       oss.str("");
       oss << "     TEST COMMAND WITH TIME TAG"
@@ -3319,6 +3422,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.nsq110.obj.pop = obj->pop;
       sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
       VS += 2;
+      startAckTimer();
 
       oss.str("");
       oss << "     PARAMETER OF MEASURED NORMALIZED VALUE, ADDRESS "
@@ -3356,6 +3460,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.nsq111.obj.pop = obj->pop;
       sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
       VS += 2;
+      startAckTimer();
 
       oss.str("");
       oss << "     PARAMETER OF MEASURED SCALED VALUE, ADDRESS "
@@ -3393,6 +3498,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.nsq112.obj.pop = obj->pop;
       sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
       VS += 2;
+      startAckTimer();
 
       oss.str("");
       oss << "     PARAMETER OF MEASURED FLOAT VALUE, ADDRESS "
@@ -3427,6 +3533,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.nsq113.obj.qpa = short(obj->qpa);
       sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
       VS += 2;
+      startAckTimer();
 
       oss.str("");
       oss << "     PARAMETER ACTIVATION, ADDRESS "
@@ -3456,6 +3563,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.asdu101.rqt = uint8_t(obj->value);
       sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
       VS += 2;
+      startAckTimer();
 
       oss.str("");
       oss << "     COUNTER INTERROGATION COMMAND, ADDRESS "
@@ -3481,6 +3589,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       apducmd.asdu102.ioa8 = static_cast<uint8_t>(obj->address >> 16);
       sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
       VS += 2;
+      startAckTimer();
 
       oss.str("");
       oss << "     READ COMMAND, ADDRESS "
@@ -3513,10 +3622,10 @@ bool iec104_class::sendCommand(iec_obj* obj) {
         apducmd.nsq64.obj.time.mday = static_cast<uint8_t>(agora->tm_mday);
         apducmd.nsq64.obj.time.hour = static_cast<uint8_t>(agora->tm_hour);
         apducmd.nsq64.obj.time.min = static_cast<uint8_t>(agora->tm_min);
-        apducmd.nsq64.obj.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000);
+        apducmd.nsq64.obj.time.msec = static_cast<uint16_t>(agora->tm_sec * 1000 + nowMs);
         apducmd.nsq64.obj.time.iv = 0;
         apducmd.nsq64.obj.time.su = static_cast<uint8_t>(agora->tm_isdst);
-        apducmd.nsq64.obj.time.wday = static_cast<uint8_t>(agora->tm_wday);
+        apducmd.nsq64.obj.time.wday = cp56WeekDay(agora);
         apducmd.nsq64.obj.time.res1 = 0;
         apducmd.nsq64.obj.time.res2 = 0;
         apducmd.nsq64.obj.time.res3 = 0;
@@ -3528,6 +3637,7 @@ bool iec104_class::sendCommand(iec_obj* obj) {
       }
       sendTCP(reinterpret_cast<char*>(&apducmd), apducmd.length + sizeof(apducmd.start) + sizeof(apducmd.length));
       VS += 2;
+      startAckTimer();
 
       oss.str("");
       oss << "     BITSTRING COMMAND" << (withTime ? " W/TIME" : "")

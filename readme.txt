@@ -17,7 +17,7 @@ This software implements an IEC 60870-5-104 protocol tester.
 IEC 60870-5-104 is a commonly used protocol for data acquisition and control of power substations.
 
 Directories:
-src - multiplatform qt sources, compile with QT 6.10.0 or later on any supported platform.
+src - multiplatform qt sources, compile with Qt 6.12 LTS (6.12.0 or later 6.12.x) on any supported platform.
 bin - windows x64 binaries.
 conf - configuration file
 
@@ -59,8 +59,9 @@ PORT=2404
 USE_TLS=0                                              ; 1=use TLS, 0=use plain TCP 
 CA_CERT_PATH=c:/temp/ca.crt                            ; root CA certificate in PEM format
 LOCAL_CERT_PATH=c:/temp/client.crt                     ; client certificate in PEM format
-PRIVATE_KEY_PATH=c:/temp/client_unencrypted.key        ; cliente key in unencrypted PEM format
+PRIVATE_KEY_PATH=c:/temp/client_unencrypted.key        ; client key, unencrypted, PEM or DER (RSA, EC or DSA)
 VERIFY_PEER=0                                          ; 1=verify server certificate against CA root 0=do not check server certificate
+TLS_PEER_NAME=                                         ; name the server certificate must carry when VERIFY_PEER=1 (default: the IP/host connected to)
 
 Thank you for the interest, please feel free to comment and contribute.
 

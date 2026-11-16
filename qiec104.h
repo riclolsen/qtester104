@@ -64,6 +64,7 @@ public:
   void setLocalCertPath(const QString &path);
   void setPrivateKeyPath(const QString &path);
   void setPeerVerifyMode(QSslSocket::PeerVerifyMode mode);
+  void setPeerVerifyName(const QString &name); // expected certificate name
   
 signals:
   void signal_dataIndication(const QVector<iec_obj> &objects);
@@ -85,7 +86,6 @@ private slots:
   void slot_keep_alive();
   void slot_sslErrors(const QList<QSslError> &errors); // Slot for SSL errors
   void slot_socketEncrypted();
-  void slot_socketError(QAbstractSocket::SocketError);
   void slot_handshakeInterruptedOnError(const QSslError &error);
 
 private:
@@ -101,7 +101,7 @@ private:
   void interrogationActConfIndication();
   void interrogationActTermIndication();
   void commandActRespIndication(iec_obj *obj);
-  void dataIndication(iec_obj *obj, unsigned numpoints);
+  void dataIndicationBatch(QVector<iec_obj> &objects) override;
   bool mEnding;
   bool mAllowConnect;
   int mConnectAttemptCounter;
@@ -112,6 +112,7 @@ private:
   QString mCaCertPath;
   QString mLocalCertPath;
   QString mPrivateKeyPath;
+  QString mPeerVerifyName;
   QSslSocket::PeerVerifyMode mVerifyMode = QSslSocket::VerifyNone; // Default to no verification for ease of testing initially
   bool verifiesPeer() const {
     return mVerifyMode == QSslSocket::VerifyPeer ||

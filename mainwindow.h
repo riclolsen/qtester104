@@ -36,6 +36,7 @@
 #include <QtWidgets/QTextBrowser>
 #include <QtWidgets/QPushButton>
 #include <QElapsedTimer>
+#include <QHash>
 #include <QQueue>
 #include <QThread>
 #include <QTimer>
@@ -97,25 +98,37 @@ class MainWindow : public QMainWindow {
   void queueProtocolCommand(const iec_obj& obj, bool fromI104M = false);
   bool commandResponseMatches(const iec_obj& resp) const;
   void sendI104MCommandResponse(const iec_obj& obj);
-  void processDataIndicationBatch(const QVector<iec_obj>& objects);
+  // one table row per (common address, object address)
+  enum PointColumn { ColAddress, ColCA, ColValue, ColType, ColCause, ColFlags,
+                     ColCount, ColTimeTag, ColumnCount };
+  struct PointRow {
+    QTableWidgetItem* cell[ColumnCount] = {};
+    quint32 count = 0; // number of updates received
+  };
+  // latest not yet displayed update of a point (display updates coalesced)
+  struct PendingPoint {
+    iec_obj obj;
+    quint32 updates;
+    qint64 arrivalMs;
+  };
+  static quint64 pointKey(unsigned ca, unsigned address) {
+    return (quint64(ca) << 32) | address;
+  }
+  QString formatAddress(unsigned address) const;
+  PointRow& pointRowFor(unsigned ca, unsigned address);
+  void displayPoint(const PendingPoint& point);
+  void clearPointTable();
   void shutdownProtocolThread();
 
-  std::map <std::pair<int, int>, QTableWidgetItem*> mapPtItem_ColAddress; // map of points to cells of table
-  std::map <std::pair<int, int>, QTableWidgetItem*> mapPtItem_ColCommonAddress;
-  std::map <std::pair<int, int>, QTableWidgetItem*> mapPtItem_ColValue;
-  std::map <std::pair<int, int>, QTableWidgetItem*> mapPtItem_ColType;
-  std::map <std::pair<int, int>, QTableWidgetItem*> mapPtItem_ColCause;
-  std::map <std::pair<int, int>, QTableWidgetItem*> mapPtItem_ColFlags;
-  std::map <std::pair<int, int>, QTableWidgetItem*> mapPtItem_ColCount;
-  std::map <std::pair<int, int>, QTableWidgetItem*> mapPtItem_ColTimeTag;
+  QHash<quint64, PointRow> pointRows;
 
   Ui::MainWindow* ui;
   QTimer* tmLogMsg; // timer to show log messages
   QTimer* tmUiDataPump; // timer to batch UI point updates
   QIec104* i104;
   QThread protocolThread;
-  QQueue<QVector<iec_obj>> pendingDataIndications;
-  qsizetype pendingDataPointCount;
+  QHash<quint64, PendingPoint> pendingPoints; // bounded by the number of points
+  QQueue<quint64> pendingOrder;               // arrival order of pendingPoints
   bool pointTableSortPending;
   bool pointTableResizePending;
   int logTickCount;

@@ -42,6 +42,7 @@
 #include <QPalette>
 #include <QStyleFactory>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QTextCursor>
 #include <string>
 
@@ -51,8 +52,8 @@ using namespace std;
 // text, so 100 sorts after 2 (also in the 8-8-8 format).
 class AddressTableItem : public QTableWidgetItem {
 public:
-  AddressTableItem(const char* text, unsigned int address)
-      : QTableWidgetItem(QString(text)) {
+  AddressTableItem(const QString& text, unsigned int address)
+      : QTableWidgetItem(text) {
     setData(Qt::UserRole, address);
   }
   bool operator<(const QTableWidgetItem& other) const override {
@@ -177,7 +178,6 @@ MainWindow::MainWindow(const QString& iniPath,
       tmLogMsg(nullptr),
       tmUiDataPump(nullptr),
       i104(new QIec104()),
-      pendingDataPointCount(0),
       pointTableSortPending(false),
       pointTableResizePending(false),
       logTickCount(0),
@@ -217,6 +217,7 @@ MainWindow::MainWindow(const QString& iniPath,
   QString localCertPath = settings.value(rtuPrefix + "LOCAL_CERT_PATH", "").toString();
   QString privateKeyPath = settings.value(rtuPrefix + "PRIVATE_KEY_PATH", "").toString();
   QString verifyPeer = settings.value(rtuPrefix + "VERIFY_PEER", "0").toString().trimmed();
+  QString tlsPeerName = settings.value(rtuPrefix + "TLS_PEER_NAME", "").toString().trimmed();
 
   PrimaryAddress = settings.value("IEC104/PRIMARY_ADDRESS", 1).toInt();
   ForcePrimary = settings.value("I104M/FORCE_PRIMARY", 0).toInt();
@@ -279,10 +280,22 @@ MainWindow::MainWindow(const QString& iniPath,
   QValidator *valip = new QRegularExpressionValidator(rx, this);
   ui->leIPRemoto->setValidator(valip);
 
+  QString bindErrorMsg;
   if (EnableI104M) {
     udps = new QUdpSocket(this);
-    udps->bind(I104M_porta_escuta);
-    udps->open(QIODevice::ReadWrite);
+    // commands are accepted from this machine only, unless a redundant HMI
+    // is configured (it sends keep alives and commands over the network)
+    const QHostAddress bindAddress =
+        I104M_HaveDualHost() ? QHostAddress(QHostAddress::Any)
+                             : QHostAddress(QHostAddress::LocalHost);
+    if (!udps->bind(bindAddress, I104M_porta_escuta)) {
+      const QString msg =
+          QString("*** I104M: CAN'T BIND UDP PORT %1 (%2), OSHMI COMMANDS DISABLED")
+              .arg(I104M_porta_escuta)
+              .arg(udps->errorString());
+      qWarning("%s", qPrintable(msg));
+      bindErrorMsg = msg; // logged once the log is set up below
+    }
   }
 
   QString qs;
@@ -332,6 +345,7 @@ MainWindow::MainWindow(const QString& iniPath,
     worker->setLocalCertPath(localCertPath);
     worker->setPrivateKeyPath(privateKeyPath);
     worker->setPeerVerifyMode(verifyMode);
+    worker->setPeerVerifyName(tlsPeerName);
     worker->setPrimaryAddress(PrimaryAddress);
     worker->ForcePrimary = ForcePrimary;
     worker->setSecondaryAddress(SecondaryAddress);
@@ -378,6 +392,9 @@ MainWindow::MainWindow(const QString& iniPath,
     ui->lbMode->setText("<font color='green'>Primary</font>");
   }
 
+  if (!bindErrorMsg.isEmpty())
+    I104M_Loga(bindErrorMsg);
+
   ui->lbCopyright->setText(QString(QTESTER_VERSION) + QString(" - ") +
                            QString(QTESTER_COPYRIGHT));
 
@@ -390,7 +407,6 @@ MainWindow::MainWindow(const QString& iniPath,
   // Set default theme to Light
   ui->cbTheme->setCurrentIndex(0);
   on_cbTheme_currentIndexChanged(0);
-  connect(ui->cbTheme, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MainWindow::on_cbTheme_currentIndexChanged);
 }
 
 MainWindow::~MainWindow() {
@@ -460,16 +476,7 @@ void MainWindow::on_pbConnect_clicked() {
     ui->pbConnect->setText("Give up...");
     ui->lbStatus->setText("<font color='green'>TRYING TO CONNECT!</font>");
 
-    mapPtItem_ColAddress.clear();
-    mapPtItem_ColCommonAddress.clear();
-    mapPtItem_ColValue.clear();
-    mapPtItem_ColType.clear();
-    mapPtItem_ColCause.clear();
-    mapPtItem_ColFlags.clear();
-    mapPtItem_ColCount.clear();
-    mapPtItem_ColTimeTag.clear();
-    ui->twPontos->clearContents();
-    ui->twPontos->setRowCount(0);
+    clearPointTable(); // also drops updates still queued from before
     // ui->lwLog->clear();
     ProtocolKeepAliveActive = true;
     queueProtocolCall([](QIec104* worker) { worker->tmKeepAlive->start(1000); });
@@ -778,8 +785,28 @@ void MainWindow::slot_dataIndication(const QVector<iec_obj>& objects) {
     return;
   }
 
-  pendingDataPointCount += objects.size();
-  pendingDataIndications.enqueue(objects);
+  // forward to OSHMI right away, independent of the (throttled) table display
+  I104M_processPoints(objects.constData(), static_cast<unsigned>(objects.size()));
+
+  if (!ui->cbPointMap->isChecked()) {
+    return;
+  }
+
+  // keep only the latest update per point until it is displayed, so a burst
+  // can't grow the backlog beyond the number of distinct points
+  const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+  for (const iec_obj& obj : objects) {
+    const quint64 key = pointKey(obj.ca, obj.address);
+    auto it = pendingPoints.find(key);
+    if (it == pendingPoints.end()) {
+      pendingPoints.insert(key, PendingPoint{obj, 1, nowMs});
+      pendingOrder.enqueue(key);
+    } else {
+      it->obj = obj;
+      it->updates++;
+      it->arrivalMs = nowMs;
+    }
+  }
 
   if (!tmUiDataPump->isActive()) {
     tmUiDataPump->start(0);
@@ -787,276 +814,237 @@ void MainWindow::slot_dataIndication(const QVector<iec_obj>& objects) {
 }
 
 void MainWindow::slot_processPendingUiData() {
-  if (pendingDataIndications.isEmpty()) {
+  if (pendingOrder.isEmpty() || !ui->cbPointMap->isChecked()) {
+    pendingPoints.clear();
+    pendingOrder.clear();
     tmUiDataPump->stop();
     return;
   }
 
-  const qsizetype maxPointsPerTick =
-      pendingDataPointCount > 20000 ? 12000 : 4000;
-  const qint64 maxMillisPerTick =
-      pendingDataPointCount > 20000 ? 30 : 20;
+  const qsizetype maxPointsPerTick = pendingOrder.size() > 20000 ? 12000 : 4000;
+  const qint64 maxMillisPerTick = pendingOrder.size() > 20000 ? 30 : 20;
 
   qsizetype pointsProcessed = 0;
   QElapsedTimer elapsed;
   elapsed.start();
 
-  const bool updatePointMap = ui->cbPointMap->isChecked();
-  if (updatePointMap) {
-    ui->twPontos->setUpdatesEnabled(false);
-  }
+  ui->twPontos->setUpdatesEnabled(false);
 
-  while (!pendingDataIndications.isEmpty()) {
-    const QVector<iec_obj> objects = pendingDataIndications.dequeue();
-    pendingDataPointCount -= objects.size();
-    processDataIndicationBatch(objects);
-    pointsProcessed += objects.size();
+  while (!pendingOrder.isEmpty()) {
+    const auto it = pendingPoints.constFind(pendingOrder.dequeue());
+    if (it == pendingPoints.constEnd())
+      continue;
+    const PendingPoint point = it.value();
+    pendingPoints.erase(it);
+    displayPoint(point);
 
-    if (pointsProcessed >= maxPointsPerTick || elapsed.elapsed() >= maxMillisPerTick) {
+    if (++pointsProcessed >= maxPointsPerTick || elapsed.elapsed() >= maxMillisPerTick) {
       break;
     }
   }
 
-  if (updatePointMap) {
-    ui->twPontos->setUpdatesEnabled(true);
-    ui->twPontos->viewport()->update();
-  }
+  ui->twPontos->setUpdatesEnabled(true);
+  ui->twPontos->viewport()->update();
 
-  if (pointTableSortPending && pendingDataIndications.isEmpty()) {
+  if (pointTableSortPending && pendingOrder.isEmpty()) {
     ui->twPontos->sortItems(0);
     pointTableSortPending = false;
   }
 
-  if (pendingDataIndications.isEmpty()) {
+  if (pendingOrder.isEmpty()) {
     tmUiDataPump->stop();
   } else {
     tmUiDataPump->start(0);
   }
 }
 
-void MainWindow::processDataIndicationBatch(const QVector<iec_obj>& objects) {
+QString MainWindow::formatAddress(unsigned address) const {
+  if (ui->cb888Mode->isChecked())
+    return QStringLiteral("%1-%2-%3")
+        .arg(address & 0xFF)
+        .arg((address >> 8) & 0xFF)
+        .arg((address >> 16) & 0xFF);
+  return QString::number(address);
+}
+
+// table row of a point, created (and the table flagged for sort/resize) when new
+MainWindow::PointRow& MainWindow::pointRowFor(unsigned ca, unsigned address) {
+  const quint64 key = pointKey(ca, address);
+  auto it = pointRows.find(key);
+  if (it != pointRows.end())
+    return it.value();
+
+  PointRow row;
+  const int rw = ui->twPontos->rowCount();
+  ui->twPontos->insertRow(rw);
+  for (int col = 0; col < ColumnCount; ++col) {
+    QTableWidgetItem* item = (col == ColAddress)
+                                 ? new AddressTableItem(formatAddress(address), address)
+                                 : new QTableWidgetItem();
+    if (col != ColTimeTag)
+      item->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    item->setFlags(Qt::ItemIsSelectable);
+    ui->twPontos->setItem(rw, col, item);
+    row.cell[col] = item;
+  }
+  row.cell[ColCA]->setText(QString::number(ca));
+  row.cell[ColCount]->setText(QStringLiteral("0"));
+
+  pointTableSortPending = true;
+  pointTableResizePending = true;
+  return pointRows.insert(key, row).value();
+}
+
+void MainWindow::clearPointTable() {
+  pointRows.clear();
+  pendingPoints.clear();
+  pendingOrder.clear();
+  pointTableSortPending = false;
+  pointTableResizePending = false;
+  ui->twPontos->clearContents();
+  ui->twPontos->setRowCount(0);
+}
+
+void MainWindow::displayPoint(const PendingPoint& point) {
   char buf[1500];
   char buftt[1500];
-  int rw = -1;
-  bool inserted = false;
-  QTableWidgetItem *pitem;
   static const char *dblmsg[] = {"tra ", "off ", "on ", "ind "};
-  const iec_obj* obj = objects.constData();
-  const unsigned numpoints = static_cast<unsigned>(objects.size());
+  const iec_obj& obj = point.obj;
 
-  if (numpoints == 0) {
-    return;
-  }
+  PointRow& row = pointRowFor(obj.ca, obj.address);
+  row.count += point.updates;
 
-  I104M_processPoints(obj, numpoints);
+  sprintf(buf, "%9.3f", double(obj.value));
+  row.cell[ColValue]->setText(QString::fromLatin1(buf));
+  sprintf(buf, "%d:%s", obj.type, i104->asduTiStr(obj.type).c_str());
+  row.cell[ColType]->setText(QString::fromLatin1(buf));
+  sprintf(buf, "%d:%s", obj.cause, i104->causeStr(obj.cause).c_str());
+  row.cell[ColCause]->setText(QString::fromLatin1(buf));
+  row.cell[ColCount]->setText(QString::number(row.count));
 
-  if (ui->cbPointMap->isChecked()) {
-    for (unsigned i = 0; i < numpoints; i++, obj++) {
-      pitem = nullptr;
-      pitem = mapPtItem_ColAddress[std::make_pair(obj->ca, obj->address)];
-      if (pitem == nullptr) {
-        if (ui->cb888Mode->isChecked()) {
-            sprintf(buf, "%u-%u-%u", obj->address & 0xFF, (obj->address >> 8) & 0xFF, (obj->address >> 16) & 0xFF);
-        } else {
-            sprintf(buf, "%u", obj->address);
-        }
+  // local arrival time; replaced by the field time for time tagged types
+  snprintf(buftt, sizeof(buftt), "Local: %s",
+           QDateTime::fromMSecsSinceEpoch(point.arrivalMs)
+               .toString(QStringLiteral("yyyy/MM/dd hh:mm:ss.zzz"))
+               .toLatin1()
+               .constData());
 
-        // insere
-        rw = ui->twPontos->rowCount();
-        ui->twPontos->insertRow(rw);
-        QTableWidgetItem *newItem = new AddressTableItem(buf, obj->address);
-        newItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        ui->twPontos->setItem(rw, 0, newItem);
-        newItem->setFlags(Qt::ItemIsSelectable);
-        mapPtItem_ColAddress[std::make_pair(obj->ca, obj->address)] = newItem;
+  buf[0] = '\0';
+    switch (obj.type) {
+    case iec104_class::M_EP_TD_1:
+      fmtCP56Time(buftt, &obj.timetag);
+      sprintf(buf, "%s%s%s%s%s%s %dms", dblmsg[obj.dp], obj.bl ? "bl " : "",
+              obj.nt ? "nt " : "", obj.sb ? "sb " : "",
+              obj.iv ? "iv " : "", obj.ei ? "ei " : "",
+              obj.elapsed_time.milliseconds);
+      break;
+    case iec104_class::M_EP_TE_1:
+      fmtCP56Time(buftt, &obj.timetag);
+      sprintf(buf, "%s%s%s%s%s%s%s%s%s%s%s %dms", obj.bl ? "bl " : "",
+              obj.nt ? "nt " : "", obj.sb ? "sb " : "",
+              obj.iv ? "iv " : "", obj.ei ? "ei " : "",
+              obj.spe.gs ? "gs " : "", obj.spe.sl1 ? "sl1 " : "",
+              obj.spe.sl2 ? "sl2 " : "", obj.spe.sl3 ? "sl3 " : "",
+              obj.spe.sie ? "sie " : "", obj.spe.srd ? "srd " : "",
+              obj.elapsed_time.milliseconds);
+      break;
+    case iec104_class::M_EP_TF_1:
+      fmtCP56Time(buftt, &obj.timetag);
+      sprintf(buf, "%s%s%s%s%s%s%s%s%s %dms", obj.bl ? "bl " : "",
+              obj.nt ? "nt " : "", obj.sb ? "sb " : "",
+              obj.iv ? "iv " : "", obj.ei ? "ei " : "",
+              obj.oci.gc ? "gc " : "", obj.oci.cl1 ? "cl1 " : "",
+              obj.oci.cl2 ? "cl2 " : "", obj.oci.cl3 ? "cl3 " : "",
+              obj.elapsed_time.milliseconds);
+      break;
 
-        newItem = new QTableWidgetItem();
-        newItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        ui->twPontos->setItem(rw, 1, newItem);
-        newItem->setFlags(Qt::ItemIsSelectable);
-        mapPtItem_ColCommonAddress[std::make_pair(obj->ca, obj->address)] =
-            newItem;
+    case iec104_class::M_SP_TB_1: // 30
+      fmtCP56Time(buftt, &obj.timetag);
+      [[fallthrough]];
+    case iec104_class::M_SP_NA_1: // 1
+      sprintf(buf, "%s%s%s%s%s", obj.sp ? "on " : "off ",
+              obj.iv ? "iv " : "", obj.bl ? "bl " : "",
+              obj.sb ? "sb " : "", obj.nt ? "nt " : "");
+      break;
+    case iec104_class::M_DP_TB_1: // 31
+      fmtCP56Time(buftt, &obj.timetag);
+      [[fallthrough]];
+    case iec104_class::M_DP_NA_1: // 3
+      sprintf(buf, "%s%s%s%s%s", dblmsg[obj.dp], obj.iv ? "iv " : "",
+              obj.bl ? "bl " : "", obj.sb ? "sb " : "",
+              obj.nt ? "nt " : "");
+      break;
+    case iec104_class::M_ST_TB_1: // 32
+      fmtCP56Time(buftt, &obj.timetag);
+      [[fallthrough]];
+    case iec104_class::M_ST_NA_1: // 5
+      sprintf(buf, "%s%s%s%s%s%s", obj.ov ? "ov " : "", obj.iv ? "iv " : "",
+              obj.bl ? "bl " : "", obj.sb ? "sb " : "",
+              obj.nt ? "nt " : "", obj.t ? "t " : "");
+      break;
 
-        newItem = new QTableWidgetItem();
-        newItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        ui->twPontos->setItem(rw, 2, newItem);
-        newItem->setFlags(Qt::ItemIsSelectable);
-        mapPtItem_ColValue[std::make_pair(obj->ca, obj->address)] = newItem;
+    case iec104_class::M_IT_TB_1: // 37
+      fmtCP56Time(buftt, &obj.timetag);
+      [[fallthrough]];
+    case iec104_class::M_IT_NA_1: // 15
+      sprintf(buf, "%s%s%s%s%u", obj.iv ? "iv " : "", obj.cadj ? "ca " : "",
+              obj.cy ? "cy " : "", "sq=", obj.sq);
+      break;
 
-        newItem = new QTableWidgetItem();
-        newItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        ui->twPontos->setItem(rw, 3, newItem);
-        newItem->setFlags(Qt::ItemIsSelectable);
-        mapPtItem_ColType[std::make_pair(obj->ca, obj->address)] = newItem;
+    case iec104_class::M_PS_NA_1: // 38
+      sprintf(buf,
+              "%s%s%s%s%s ST %d%d%d%d %d%d%d%d %d%d%d%d %d%d%d%d CH %d%d%d%d "
+              "%d%d%d%d %d%d%d%d %d%d%d%d [1-16]",
+              obj.ov ? "ov " : "", obj.bl ? "bl " : "",
+              obj.nt ? "nt " : "", obj.sb ? "sb " : "",
+              obj.iv ? "iv " : "", obj.stcd.st1, obj.stcd.st2,
+              obj.stcd.st3, obj.stcd.st4, obj.stcd.st5, obj.stcd.st6,
+              obj.stcd.st7, obj.stcd.st8, obj.stcd.st9, obj.stcd.st10,
+              obj.stcd.st11, obj.stcd.st12, obj.stcd.st13, obj.stcd.st14,
+              obj.stcd.st15, obj.stcd.st16, obj.stcd.cd1, obj.stcd.cd2,
+              obj.stcd.cd3, obj.stcd.cd4, obj.stcd.cd5, obj.stcd.cd6,
+              obj.stcd.cd7, obj.stcd.cd8, obj.stcd.cd9, obj.stcd.cd10,
+              obj.stcd.cd11, obj.stcd.cd12, obj.stcd.cd13, obj.stcd.cd14,
+              obj.stcd.cd15, obj.stcd.cd16);
+      break;
 
-        newItem = new QTableWidgetItem();
-        newItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        ui->twPontos->setItem(rw, 4, newItem);
-        newItem->setFlags(Qt::ItemIsSelectable);
-        mapPtItem_ColCause[std::make_pair(obj->ca, obj->address)] = newItem;
+    case iec104_class::M_BO_TB_1: // 33
+      fmtCP56Time(buftt, &obj.timetag);
+      [[fallthrough]];
+    case iec104_class::M_BO_NA_1: // 7
+      sprintf(buf,
+              "%s%s%s%s%s ST %d%d%d%d %d%d%d%d %d%d%d%d %d%d%d%d %d%d%d%d "
+              "%d%d%d%d %d%d%d%d %d%d%d%d [1-32]",
+              obj.ov ? "ov " : "", obj.bl ? "bl " : "",
+              obj.nt ? "nt " : "", obj.sb ? "sb " : "",
+              obj.iv ? "iv " : "", obj.bsi.st1, obj.bsi.st2, obj.bsi.st3,
+              obj.bsi.st4, obj.bsi.st5, obj.bsi.st6, obj.bsi.st7,
+              obj.bsi.st8, obj.bsi.st9, obj.bsi.st10, obj.bsi.st11,
+              obj.bsi.st12, obj.bsi.st13, obj.bsi.st14, obj.bsi.st15,
+              obj.bsi.st16, obj.bsi.st17, obj.bsi.st18, obj.bsi.st19,
+              obj.bsi.st20, obj.bsi.st21, obj.bsi.st22, obj.bsi.st23,
+              obj.bsi.st24, obj.bsi.st25, obj.bsi.st26, obj.bsi.st27,
+              obj.bsi.st28, obj.bsi.st29, obj.bsi.st30, obj.bsi.st31, obj.bsi.st32);
+      break;
 
-        newItem = new QTableWidgetItem();
-        newItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        ui->twPontos->setItem(rw, 5, newItem);
-        newItem->setFlags(Qt::ItemIsSelectable);
-        mapPtItem_ColFlags[std::make_pair(obj->ca, obj->address)] = newItem;
-
-        newItem = new QTableWidgetItem("0");
-        newItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        ui->twPontos->setItem(rw, 6, newItem);
-        newItem->setFlags(Qt::ItemIsSelectable);
-        mapPtItem_ColCount[std::make_pair(obj->ca, obj->address)] = newItem;
-
-        newItem = new QTableWidgetItem();
-        ui->twPontos->setItem(rw, 7, newItem);
-        newItem->setFlags(Qt::ItemIsSelectable);
-        mapPtItem_ColTimeTag[std::make_pair(obj->ca, obj->address)] = newItem;
-
-        inserted = true;
-      }
-
-      sprintf(buf, "%9.3f", double(obj->value));
-      mapPtItem_ColValue[std::make_pair(obj->ca, obj->address)]->setText(buf);
-      sprintf(buf, "%u", obj->ca);
-      mapPtItem_ColCommonAddress[std::make_pair(obj->ca, obj->address)]
-          ->setText(buf);
-      sprintf(buf, "%d:%s", obj->type, i104->asduTiStr(obj->type).c_str());
-      mapPtItem_ColType[std::make_pair(obj->ca, obj->address)]->setText(buf);
-      sprintf(buf, "%d:%s", obj->cause, i104->causeStr(obj->cause).c_str());
-      mapPtItem_ColCause[std::make_pair(obj->ca, obj->address)]->setText(buf);
-      sprintf(buf, "%d",
-              1 + mapPtItem_ColCount[std::make_pair(obj->ca, obj->address)]
-                      ->text()
-                      .toInt());
-      mapPtItem_ColCount[std::make_pair(obj->ca, obj->address)]->setText(buf);
-
-      QDateTime current = QDateTime::currentDateTime();
-      sprintf(
-          buftt, "Local: %s",
-          current.toString("yyyy/MM/dd hh:mm:ss.zzz").toStdString().c_str());
-
-      switch (obj->type) {
-      case iec104_class::M_EP_TD_1:
-        fmtCP56Time(buftt, &obj->timetag);
-        sprintf(buf, "%s%s%s%s%s%s %dms", dblmsg[obj->dp], obj->bl ? "bl " : "",
-                obj->nt ? "nt " : "", obj->sb ? "sb " : "",
-                obj->iv ? "iv " : "", obj->ei ? "ei " : "",
-                obj->elapsed_time.milliseconds);
-        break;
-      case iec104_class::M_EP_TE_1:
-        fmtCP56Time(buftt, &obj->timetag);
-        sprintf(buf, "%s%s%s%s%s%s%s%s%s%s%s %dms", obj->bl ? "bl " : "",
-                obj->nt ? "nt " : "", obj->sb ? "sb " : "",
-                obj->iv ? "iv " : "", obj->ei ? "ei " : "",
-                obj->spe.gs ? "gs " : "", obj->spe.sl1 ? "sl1 " : "",
-                obj->spe.sl2 ? "sl2 " : "", obj->spe.sl3 ? "sl3 " : "",
-                obj->spe.sie ? "sie " : "", obj->spe.srd ? "srd " : "",
-                obj->elapsed_time.milliseconds);
-        break;
-      case iec104_class::M_EP_TF_1:
-        fmtCP56Time(buftt, &obj->timetag);
-        sprintf(buf, "%s%s%s%s%s%s%s%s%s %dms", obj->bl ? "bl " : "",
-                obj->nt ? "nt " : "", obj->sb ? "sb " : "",
-                obj->iv ? "iv " : "", obj->ei ? "ei " : "",
-                obj->oci.gc ? "gc " : "", obj->oci.cl1 ? "cl1 " : "",
-                obj->oci.cl2 ? "cl2 " : "", obj->oci.cl3 ? "cl3 " : "",
-                obj->elapsed_time.milliseconds);
-        break;
-
-      case iec104_class::M_SP_TB_1: // 30
-        fmtCP56Time(buftt, &obj->timetag);
-        [[fallthrough]];
-      case iec104_class::M_SP_NA_1: // 1
-        sprintf(buf, "%s%s%s%s%s", obj->sp ? "on " : "off ",
-                obj->iv ? "iv " : "", obj->bl ? "bl " : "",
-                obj->sb ? "sb " : "", obj->nt ? "nt " : "");
-        break;
-      case iec104_class::M_DP_TB_1: // 31
-        fmtCP56Time(buftt, &obj->timetag);
-        [[fallthrough]];
-      case iec104_class::M_DP_NA_1: // 3
-        sprintf(buf, "%s%s%s%s%s", dblmsg[obj->dp], obj->iv ? "iv " : "",
-                obj->bl ? "bl " : "", obj->sb ? "sb " : "",
-                obj->nt ? "nt " : "");
-        break;
-      case iec104_class::M_ST_TB_1: // 32
-        fmtCP56Time(buftt, &obj->timetag);
-        [[fallthrough]];
-      case iec104_class::M_ST_NA_1: // 5
-        sprintf(buf, "%s%s%s%s%s%s", obj->ov ? "ov " : "", obj->iv ? "iv " : "",
-                obj->bl ? "bl " : "", obj->sb ? "sb " : "",
-                obj->nt ? "nt " : "", obj->t ? "t " : "");
-        break;
-
-      case iec104_class::M_IT_TB_1: // 37
-        fmtCP56Time(buftt, &obj->timetag);
-        [[fallthrough]];
-      case iec104_class::M_IT_NA_1: // 15
-        sprintf(buf, "%s%s%s%s%u", obj->iv ? "iv " : "", obj->cadj ? "ca " : "",
-                obj->cy ? "cy " : "", "sq=", obj->sq);
-        break;
-
-      case iec104_class::M_PS_NA_1: // 38
-        sprintf(buf,
-                "%s%s%s%s%s ST %d%d%d%d %d%d%d%d %d%d%d%d %d%d%d%d CH %d%d%d%d "
-                "%d%d%d%d %d%d%d%d %d%d%d%d [1-16]",
-                obj->ov ? "ov " : "", obj->bl ? "bl " : "",
-                obj->nt ? "nt " : "", obj->sb ? "sb " : "",
-                obj->iv ? "iv " : "", obj->stcd.st1, obj->stcd.st2,
-                obj->stcd.st3, obj->stcd.st4, obj->stcd.st5, obj->stcd.st6,
-                obj->stcd.st7, obj->stcd.st8, obj->stcd.st9, obj->stcd.st10,
-                obj->stcd.st11, obj->stcd.st12, obj->stcd.st13, obj->stcd.st14,
-                obj->stcd.st15, obj->stcd.st16, obj->stcd.cd1, obj->stcd.cd2,
-                obj->stcd.cd3, obj->stcd.cd4, obj->stcd.cd5, obj->stcd.cd6,
-                obj->stcd.cd7, obj->stcd.cd8, obj->stcd.cd9, obj->stcd.cd10,
-                obj->stcd.cd11, obj->stcd.cd12, obj->stcd.cd13, obj->stcd.cd14,
-                obj->stcd.cd15, obj->stcd.cd16);
-        break;
-
-      case iec104_class::M_BO_TB_1: // 33
-        fmtCP56Time(buftt, &obj->timetag);
-        [[fallthrough]];
-      case iec104_class::M_BO_NA_1: // 7
-        sprintf(buf,
-                "%s%s%s%s%s ST %d%d%d%d %d%d%d%d %d%d%d%d %d%d%d%d %d%d%d%d "
-                "%d%d%d%d %d%d%d%d %d%d%d%d [1-32]",
-                obj->ov ? "ov " : "", obj->bl ? "bl " : "",
-                obj->nt ? "nt " : "", obj->sb ? "sb " : "",
-                obj->iv ? "iv " : "", obj->bsi.st1, obj->bsi.st2, obj->bsi.st3,
-                obj->bsi.st4, obj->bsi.st5, obj->bsi.st6, obj->bsi.st7,
-                obj->bsi.st8, obj->bsi.st9, obj->bsi.st10, obj->bsi.st11,
-                obj->bsi.st12, obj->bsi.st13, obj->bsi.st14, obj->bsi.st15,
-                obj->bsi.st16, obj->bsi.st17, obj->bsi.st18, obj->bsi.st19,
-                obj->bsi.st20, obj->bsi.st21, obj->bsi.st22, obj->bsi.st23,
-                obj->bsi.st24, obj->bsi.st25, obj->bsi.st26, obj->bsi.st27,
-                obj->bsi.st28, obj->bsi.st29, obj->bsi.st30, obj->bsi.st31, obj->bsi.st32);
-        break;
-
-      case iec104_class::M_ME_TD_1: // 34
-      case iec104_class::M_ME_TE_1: // 35
-      case iec104_class::M_ME_TF_1: // 36
-        fmtCP56Time(buftt, &obj->timetag);
-        [[fallthrough]];
-      case iec104_class::M_ME_NA_1: // 9
-      case iec104_class::M_ME_NB_1: // 11
-      case iec104_class::M_ME_NC_1: // 13
-      case iec104_class::M_ME_ND_1: // 21
-        sprintf(buf, "%s%s%s%s%s", obj->ov ? "ov " : "", obj->iv ? "iv " : "",
-                obj->bl ? "bl " : "", obj->sb ? "sb " : "",
-                obj->nt ? "nt " : "");
-        break;
-      }
-
-      mapPtItem_ColFlags[std::make_pair(obj->ca, obj->address)]->setText(buf);
-      mapPtItem_ColTimeTag[std::make_pair(obj->ca, obj->address)]->setText(
-          buftt);
+    case iec104_class::M_ME_TD_1: // 34
+    case iec104_class::M_ME_TE_1: // 35
+    case iec104_class::M_ME_TF_1: // 36
+      fmtCP56Time(buftt, &obj.timetag);
+      [[fallthrough]];
+    case iec104_class::M_ME_NA_1: // 9
+    case iec104_class::M_ME_NB_1: // 11
+    case iec104_class::M_ME_NC_1: // 13
+    case iec104_class::M_ME_ND_1: // 21
+      sprintf(buf, "%s%s%s%s%s", obj.ov ? "ov " : "", obj.iv ? "iv " : "",
+              obj.bl ? "bl " : "", obj.sb ? "sb " : "",
+              obj.nt ? "nt " : "");
+      break;
     }
 
-    if (inserted) {
-      pointTableSortPending = true;
-      pointTableResizePending = true;
-    }
-  }
+
+  row.cell[ColFlags]->setText(QString::fromLatin1(buf));
+  row.cell[ColTimeTag]->setText(QString::fromLatin1(buftt));
 }
 
 void MainWindow::slot_timer_logmsg() {
@@ -1068,7 +1056,7 @@ void MainWindow::slot_timer_logmsg() {
 
   // adjust size of rows and columns
   if (!(++logTickCount % 50))
-    if (pointTableResizePending && pendingDataIndications.isEmpty()) {
+    if (pointTableResizePending && pendingOrder.isEmpty()) {
       ui->twPontos->resizeRowsToContents();
       ui->twPontos->resizeColumnsToContents();
       pointTableResizePending = false;
@@ -1158,8 +1146,6 @@ void MainWindow::slot_commandActRespIndication(const iec_obj& obj) {
 
   char buf[1000];
   char buftt[1000];
-  int rw = -1;
-  QTableWidgetItem *pitem;
   static const char *pnmsg[] = {"pos ", "neg "};
   static const char *selmsg[] = {"exe ", "sel "};
   static const char *sglmsg[] = {"off ", "on "};
@@ -1178,77 +1164,16 @@ void MainWindow::slot_commandActRespIndication(const iec_obj& obj) {
     return;
 
   if (ui->cbPointMap->isChecked()) {
-    pitem = nullptr;
-    pitem = mapPtItem_ColAddress[std::make_pair(obj.ca, obj.address)];
-    if (pitem == nullptr) {
-      sprintf(buf, "%06u", obj.address);
-
-      // insere
-      rw = ui->twPontos->rowCount();
-      ui->twPontos->insertRow(rw);
-      QTableWidgetItem *newItem = new AddressTableItem(buf, obj.address);
-      newItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
-      ui->twPontos->setItem(rw, 0, newItem);
-      newItem->setFlags(Qt::ItemIsSelectable);
-      mapPtItem_ColAddress[std::make_pair(obj.ca, obj.address)] = newItem;
-
-      newItem = new QTableWidgetItem();
-      newItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
-      ui->twPontos->setItem(rw, 1, newItem);
-      newItem->setFlags(Qt::ItemIsSelectable);
-      mapPtItem_ColCommonAddress[std::make_pair(obj.ca, obj.address)] =
-          newItem;
-
-      newItem = new QTableWidgetItem();
-      newItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
-      ui->twPontos->setItem(rw, 2, newItem);
-      newItem->setFlags(Qt::ItemIsSelectable);
-      mapPtItem_ColValue[std::make_pair(obj.ca, obj.address)] = newItem;
-
-      newItem = new QTableWidgetItem();
-      newItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
-      ui->twPontos->setItem(rw, 3, newItem);
-      newItem->setFlags(Qt::ItemIsSelectable);
-      mapPtItem_ColType[std::make_pair(obj.ca, obj.address)] = newItem;
-
-      newItem = new QTableWidgetItem();
-      newItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
-      ui->twPontos->setItem(rw, 4, newItem);
-      newItem->setFlags(Qt::ItemIsSelectable);
-      mapPtItem_ColCause[std::make_pair(obj.ca, obj.address)] = newItem;
-
-      newItem = new QTableWidgetItem();
-      newItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
-      ui->twPontos->setItem(rw, 5, newItem);
-      newItem->setFlags(Qt::ItemIsSelectable);
-      mapPtItem_ColFlags[std::make_pair(obj.ca, obj.address)] = newItem;
-
-      newItem = new QTableWidgetItem("0");
-      newItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
-      ui->twPontos->setItem(rw, 6, newItem);
-      newItem->setFlags(Qt::ItemIsSelectable);
-      mapPtItem_ColCount[std::make_pair(obj.ca, obj.address)] = newItem;
-
-      newItem = new QTableWidgetItem();
-      ui->twPontos->setItem(rw, 7, newItem);
-      newItem->setFlags(Qt::ItemIsSelectable);
-      mapPtItem_ColTimeTag[std::make_pair(obj.ca, obj.address)] = newItem;
-    }
+    PointRow& row = pointRowFor(obj.ca, obj.address);
+    row.count++;
 
     sprintf(buf, "%9.3f", double(obj.value));
-    mapPtItem_ColValue[std::make_pair(obj.ca, obj.address)]->setText(buf);
-    sprintf(buf, "%u", obj.ca);
-    mapPtItem_ColCommonAddress[std::make_pair(obj.ca, obj.address)]->setText(
-        buf);
+    row.cell[ColValue]->setText(buf);
     sprintf(buf, "%d", obj.type);
-    mapPtItem_ColType[std::make_pair(obj.ca, obj.address)]->setText(buf);
+    row.cell[ColType]->setText(buf);
     sprintf(buf, "%d", obj.cause);
-    mapPtItem_ColCause[std::make_pair(obj.ca, obj.address)]->setText(buf);
-    sprintf(buf, "%d",
-            1 + mapPtItem_ColCount[std::make_pair(obj.ca, obj.address)]
-                    ->text()
-                    .toInt());
-    mapPtItem_ColCount[std::make_pair(obj.ca, obj.address)]->setText(buf);
+    row.cell[ColCause]->setText(buf);
+    row.cell[ColCount]->setText(QString::number(row.count));
 
     QDateTime current = QDateTime::currentDateTime();
     sprintf(buftt, "Local: %s",
@@ -1259,7 +1184,7 @@ void MainWindow::slot_commandActRespIndication(const iec_obj& obj) {
       [[fallthrough]];
     case iec104_class::C_SC_NA_1:
       sprintf(buf, "%d", int(obj.scs));
-      mapPtItem_ColValue[std::make_pair(obj.ca, obj.address)]->setText(buf);
+      row.cell[ColValue]->setText(buf);
       sprintf(buf, "%s%s%s%s", pnmsg[obj.pn], sglmsg[obj.scs],
               selmsg[obj.se], qumsg[qu_idx]);
       break;
@@ -1268,7 +1193,7 @@ void MainWindow::slot_commandActRespIndication(const iec_obj& obj) {
       [[fallthrough]];
     case iec104_class::C_DC_NA_1:
       sprintf(buf, "%d", int(obj.dcs));
-      mapPtItem_ColValue[std::make_pair(obj.ca, obj.address)]->setText(buf);
+      row.cell[ColValue]->setText(buf);
       sprintf(buf, "%s%s%s%s", pnmsg[obj.pn], dblmsg[obj.dcs],
               selmsg[obj.se], qumsg[qu_idx]);
       break;
@@ -1277,7 +1202,7 @@ void MainWindow::slot_commandActRespIndication(const iec_obj& obj) {
       [[fallthrough]];
     case iec104_class::C_RC_NA_1:
       sprintf(buf, "%d", int(obj.rcs));
-      mapPtItem_ColValue[std::make_pair(obj.ca, obj.address)]->setText(buf);
+      row.cell[ColValue]->setText(buf);
       sprintf(buf, "%s%s%s", pnmsg[obj.pn], rcsmsg[obj.rcs], selmsg[obj.se]);
       break;
     case iec104_class::C_SE_TA_1:
@@ -1317,8 +1242,8 @@ void MainWindow::slot_commandActRespIndication(const iec_obj& obj) {
       break;
     }
 
-    mapPtItem_ColFlags[std::make_pair(obj.ca, obj.address)]->setText(buf);
-    mapPtItem_ColTimeTag[std::make_pair(obj.ca, obj.address)]->setText(buftt);
+    row.cell[ColFlags]->setText(buf);
+    row.cell[ColTimeTag]->setText(buftt);
   }
 
   if (!commandResponseMatches(obj))
@@ -1835,6 +1760,16 @@ void MainWindow::fmtCP56Time(char *buf, const cp56time2a *timetag) {
 }
 
 void MainWindow::on_cbTheme_currentIndexChanged(int index) {
+    // the theme is application wide: keep the selector of the other RTU tabs
+    // showing the same choice (without re-triggering this slot)
+    if (QWidget* top = window()) {
+        for (MainWindow* other : top->findChildren<MainWindow*>()) {
+            if (other != this && other->ui->cbTheme->currentIndex() != index) {
+                const QSignalBlocker blocker(other->ui->cbTheme);
+                other->ui->cbTheme->setCurrentIndex(index);
+            }
+        }
+    }
     if (index == 1) { // Dark
         qApp->setStyle(QStyleFactory::create("Fusion"));
         QPalette darkPalette;
@@ -1875,14 +1810,8 @@ void MainWindow::on_cb888Mode_stateChanged(int arg1)
     ui->leCmdAddressMid->setVisible(arg1);
     ui->leCmdAddressHigh->setVisible(arg1);
 
-    for (auto const& pair : mapPtItem_ColAddress) {
-        unsigned int address = pair.first.second;
-        char buf[64];
-        if (arg1) {
-            sprintf(buf, "%u-%u-%u", address & 0xFF, (address >> 8) & 0xFF, (address >> 16) & 0xFF);
-        } else {
-            sprintf(buf, "%u", address);
-        }
-        pair.second->setText(buf);
+    for (auto it = pointRows.cbegin(); it != pointRows.cend(); ++it) {
+        const unsigned address = unsigned(it.key() & 0xFFFFFFFFu);
+        it.value().cell[ColAddress]->setText(formatAddress(address));
     }
 }
