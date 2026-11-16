@@ -47,6 +47,22 @@
 
 using namespace std;
 
+// Point table address cell that sorts by the numeric address instead of the
+// text, so 100 sorts after 2 (also in the 8-8-8 format).
+class AddressTableItem : public QTableWidgetItem {
+public:
+  AddressTableItem(const char* text, unsigned int address)
+      : QTableWidgetItem(QString(text)) {
+    setData(Qt::UserRole, address);
+  }
+  bool operator<(const QTableWidgetItem& other) const override {
+    const QVariant otherAddress = other.data(Qt::UserRole);
+    if (!otherAddress.isValid())
+      return QTableWidgetItem::operator<(other);
+    return data(Qt::UserRole).toUInt() < otherAddress.toUInt();
+  }
+};
+
 static unsigned int parseIoa(const QString& str) {
     if (str.contains('-') || str.contains('.')) {
         QStringList parts = str.split(QRegularExpression("[-.]"));
@@ -799,7 +815,7 @@ void MainWindow::processDataIndicationBatch(const QVector<iec_obj>& objects) {
         // insere
         rw = ui->twPontos->rowCount();
         ui->twPontos->insertRow(rw);
-        QTableWidgetItem *newItem = new QTableWidgetItem(buf);
+        QTableWidgetItem *newItem = new AddressTableItem(buf, obj->address);
         newItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
         ui->twPontos->setItem(rw, 0, newItem);
         newItem->setFlags(Qt::ItemIsSelectable);
@@ -1120,7 +1136,7 @@ void MainWindow::slot_commandActRespIndication(const iec_obj& obj) {
       // insere
       rw = ui->twPontos->rowCount();
       ui->twPontos->insertRow(rw);
-      QTableWidgetItem *newItem = new QTableWidgetItem(buf);
+      QTableWidgetItem *newItem = new AddressTableItem(buf, obj.address);
       newItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
       ui->twPontos->setItem(rw, 0, newItem);
       newItem->setFlags(Qt::ItemIsSelectable);
