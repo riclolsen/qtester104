@@ -103,6 +103,8 @@ class MainWindow : public QMainWindow {
   void reportCommandFailure(const iec_obj& obj, const char* why);
   bool readCommandAddress(unsigned* address);
   void processDataIndication(const QVector<iec_obj>& objects);
+  static QPalette lightPalette();
+  static QPalette darkPalette();
   bool commandResponseMatches(const iec_obj& resp) const;
   void sendI104MCommandResponse(const iec_obj& obj);
   // one table row per (common address, object address)

@@ -41,6 +41,8 @@
 #include <QSslSocket>
 #include <QPalette>
 #include <QStyleFactory>
+#include <QStyleHints>
+#include <QGuiApplication>
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QTextCursor>
@@ -1881,29 +1883,73 @@ void MainWindow::on_cbTheme_currentIndexChanged(int index) {
             }
         }
     }
-    if (index == 1) { // Dark
-        qApp->setStyle(QStyleFactory::create("Fusion"));
-        QPalette darkPalette;
-        darkPalette.setColor(QPalette::Window, QColor(53,53,53));
-        darkPalette.setColor(QPalette::WindowText, Qt::white);
-        darkPalette.setColor(QPalette::Base, QColor(25,25,25));
-        darkPalette.setColor(QPalette::AlternateBase, QColor(53,53,53));
-        darkPalette.setColor(QPalette::ToolTipBase, Qt::white);
-        darkPalette.setColor(QPalette::ToolTipText, Qt::white);
-        darkPalette.setColor(QPalette::Text, Qt::white);
-        darkPalette.setColor(QPalette::Button, QColor(53,53,53));
-        darkPalette.setColor(QPalette::ButtonText, Qt::white);
-        darkPalette.setColor(QPalette::BrightText, Qt::red);
-        darkPalette.setColor(QPalette::Link, QColor(42, 130, 218));
-        darkPalette.setColor(QPalette::Highlight, QColor(42, 130, 218));
-        darkPalette.setColor(QPalette::HighlightedText, Qt::black);
-        qApp->setPalette(darkPalette);
-    } else { // Light
-        qApp->setStyle(QStyleFactory::create("Fusion"));
-        QPalette sp = QApplication::style()->standardPalette();
-        sp.setColor(QPalette::Text, Qt::black);
-        qApp->setPalette(sp);
+    const bool dark = (index == 1);
+    // Fusion takes its palette and some drawing details from the color scheme
+    // the platform reports, which on Windows follows the system dark mode; ask
+    // for the chosen scheme (also turns the native title bar light or dark)
+    QGuiApplication::styleHints()->setColorScheme(dark ? Qt::ColorScheme::Dark
+                                                       : Qt::ColorScheme::Light);
+    qApp->setStyle(QStyleFactory::create("Fusion"));
+    // explicit palettes: the theme must not depend on the scheme request being
+    // honored by the platform
+    qApp->setPalette(dark ? darkPalette() : lightPalette());
+}
+
+// Qt's own light Fusion palette (qt_fusionPalette() in light mode)
+QPalette MainWindow::lightPalette() {
+    const QColor windowText = Qt::black;
+    const QColor background(239, 239, 239);
+    const QColor light = background.lighter(150);
+    const QColor mid = background.darker(130);
+    const QColor dark = background.darker(150);
+    const QColor shadow = dark.darker(135);
+    const QColor highlight(48, 140, 198);
+    const QColor disabledText(190, 190, 190);
+    const QColor disabledHighlight(145, 145, 145);
+    QColor placeholder = windowText;
+    placeholder.setAlpha(128);
+
+    QPalette p(windowText, background, light, dark, mid, Qt::black, Qt::white);
+    p.setBrush(QPalette::Window, background);
+    p.setBrush(QPalette::Base, Qt::white);
+    p.setBrush(QPalette::AlternateBase, QColor(247, 247, 247));
+    p.setBrush(QPalette::Midlight, mid.lighter(110));
+    p.setBrush(QPalette::Shadow, shadow);
+    p.setBrush(QPalette::ToolTipBase, QColor(255, 255, 220));
+    p.setBrush(QPalette::ToolTipText, Qt::black);
+    p.setBrush(QPalette::HighlightedText, Qt::white);
+    p.setBrush(QPalette::PlaceholderText, placeholder);
+    for (const auto group : {QPalette::Active, QPalette::Inactive}) {
+        p.setBrush(group, QPalette::Highlight, highlight);
+        p.setBrush(group, QPalette::Accent, highlight);
     }
+    p.setBrush(QPalette::Disabled, QPalette::Text, disabledText);
+    p.setBrush(QPalette::Disabled, QPalette::WindowText, disabledText);
+    p.setBrush(QPalette::Disabled, QPalette::ButtonText, disabledText);
+    p.setBrush(QPalette::Disabled, QPalette::Base, background);
+    p.setBrush(QPalette::Disabled, QPalette::Dark, QColor(209, 209, 209).darker(110));
+    p.setBrush(QPalette::Disabled, QPalette::Shadow, shadow.lighter(150));
+    p.setBrush(QPalette::Disabled, QPalette::Highlight, disabledHighlight);
+    p.setBrush(QPalette::Disabled, QPalette::Accent, disabledHighlight);
+    return p;
+}
+
+QPalette MainWindow::darkPalette() {
+    QPalette darkPalette;
+    darkPalette.setColor(QPalette::Window, QColor(53,53,53));
+    darkPalette.setColor(QPalette::WindowText, Qt::white);
+    darkPalette.setColor(QPalette::Base, QColor(25,25,25));
+    darkPalette.setColor(QPalette::AlternateBase, QColor(53,53,53));
+    darkPalette.setColor(QPalette::ToolTipBase, Qt::white);
+    darkPalette.setColor(QPalette::ToolTipText, Qt::white);
+    darkPalette.setColor(QPalette::Text, Qt::white);
+    darkPalette.setColor(QPalette::Button, QColor(53,53,53));
+    darkPalette.setColor(QPalette::ButtonText, Qt::white);
+    darkPalette.setColor(QPalette::BrightText, Qt::red);
+    darkPalette.setColor(QPalette::Link, QColor(42, 130, 218));
+    darkPalette.setColor(QPalette::Highlight, QColor(42, 130, 218));
+    darkPalette.setColor(QPalette::HighlightedText, Qt::black);
+    return darkPalette;
 }
 
 void MainWindow::on_cbEnableTls_stateChanged(int arg1)
